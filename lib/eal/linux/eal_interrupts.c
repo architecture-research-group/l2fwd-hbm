@@ -7,13 +7,10 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/queue.h>
-#include <stdarg.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
-#include <inttypes.h>
 #include <sys/epoll.h>
-#include <sys/signalfd.h>
 #include <sys/ioctl.h>
 #include <sys/eventfd.h>
 #include <assert.h>
@@ -21,9 +18,6 @@
 
 #include <rte_common.h>
 #include <rte_interrupts.h>
-#include <rte_memory.h>
-#include <rte_launch.h>
-#include <rte_eal.h>
 #include <rte_per_lcore.h>
 #include <rte_lcore.h>
 #include <rte_branch_prediction.h>
@@ -36,8 +30,6 @@
 #include <rte_eal_trace.h>
 
 #include "eal_private.h"
-#include "eal_vfio.h"
-#include "eal_thread.h"
 
 #define EAL_INTR_EPOLL_WAIT_FOREVER (-1)
 #define NB_OTHER_INTR               1
@@ -589,7 +581,7 @@ rte_intr_callback_unregister_pending(const struct rte_intr_handle *intr_handle,
 
 	rte_spinlock_lock(&intr_lock);
 
-	/* check if the insterrupt source for the fd is existent */
+	/* check if the interrupt source for the fd is existent */
 	TAILQ_FOREACH(src, &intr_sources, next) {
 		if (rte_intr_fd_get(src->intr_handle) == rte_intr_fd_get(intr_handle))
 			break;
@@ -639,7 +631,7 @@ rte_intr_callback_unregister(const struct rte_intr_handle *intr_handle,
 
 	rte_spinlock_lock(&intr_lock);
 
-	/* check if the insterrupt source for the fd is existent */
+	/* check if the interrupt source for the fd is existent */
 	TAILQ_FOREACH(src, &intr_sources, next)
 		if (rte_intr_fd_get(src->intr_handle) == rte_intr_fd_get(intr_handle))
 			break;

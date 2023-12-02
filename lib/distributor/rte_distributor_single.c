@@ -4,9 +4,7 @@
 
 #include <stdio.h>
 #include <sys/queue.h>
-#include <string.h>
 #include <rte_mbuf.h>
-#include <rte_memory.h>
 #include <rte_memzone.h>
 #include <rte_errno.h>
 #include <rte_string_fns.h>
@@ -247,8 +245,7 @@ rte_distributor_process_single(struct rte_distributor_single *d,
 			 * worker given by the bit-position
 			 */
 			for (i = 0; i < d->num_workers; i++)
-				match |= (!(d->in_flight_tags[i] ^ new_tag)
-					<< i);
+				match |= ((uint64_t)!(d->in_flight_tags[i] ^ new_tag) << i);
 
 			/* Only turned-on bits are considered as match */
 			match &= d->in_flight_bitmask;

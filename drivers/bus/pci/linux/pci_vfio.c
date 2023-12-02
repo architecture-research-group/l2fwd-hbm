@@ -18,7 +18,7 @@
 #include <rte_malloc.h>
 #include <rte_vfio.h>
 #include <rte_eal.h>
-#include <rte_bus.h>
+#include <bus_driver.h>
 #include <rte_spinlock.h>
 #include <rte_tailq.h>
 
@@ -815,7 +815,7 @@ pci_vfio_map_resource_primary(struct rte_pci_device *dev)
 			continue;
 		}
 
-		/* skip non-mmapable BARs */
+		/* skip non-mmappable BARs */
 		if ((reg->flags & VFIO_REGION_INFO_FLAG_MMAP) == 0) {
 			free(reg);
 			continue;

@@ -2,22 +2,19 @@
  * Copyright(c) 2018 Intel Corporation
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
 
 #include <rte_string_fns.h>
 #include <rte_log.h>
-#include <rte_compat.h>
 #include <rte_dev.h>
-#include <rte_malloc.h>
 #include <rte_interrupts.h>
 #include <rte_alarm.h>
-#include <rte_bus.h>
-#include <rte_eal.h>
+#include <bus_driver.h>
 #include <rte_spinlock.h>
 #include <rte_errno.h>
 
@@ -231,13 +228,13 @@ dev_uev_handler(__rte_unused void *param)
 {
 	struct rte_dev_event uevent;
 	int ret;
-	char buf[EAL_UEV_MSG_LEN];
+	char buf[EAL_UEV_MSG_LEN + 1];
 	struct rte_bus *bus;
 	struct rte_device *dev;
 	const char *busname = "";
 
 	memset(&uevent, 0, sizeof(struct rte_dev_event));
-	memset(buf, 0, EAL_UEV_MSG_LEN);
+	memset(buf, 0, EAL_UEV_MSG_LEN + 1);
 
 	if (rte_intr_fd_get(intr_handle) < 0)
 		return;
@@ -384,6 +381,7 @@ rte_dev_event_monitor_stop(void)
 	close(rte_intr_fd_get(intr_handle));
 	rte_intr_instance_free(intr_handle);
 	intr_handle = NULL;
+	ret = 0;
 
 	monitor_refcount--;
 

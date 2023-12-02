@@ -11,7 +11,7 @@
 #include <sys/queue.h>
 
 #include <rte_pci.h>
-#include <rte_bus_pci.h>
+#include <bus_pci_driver.h>
 #include <ethdev_driver.h>
 #include <rte_memory.h>
 #include <rte_lcore.h>
@@ -72,8 +72,7 @@
 #define BROADCOM_DEV_ID_58818_VF	0xd82e
 
 #define BROADCOM_DEV_957508_N2100	0x5208
-#define IS_BNXT_DEV_957508_N2100(bp)	\
-	((bp)->pdev->id.subsystem_device_id == BROADCOM_DEV_957508_N2100)
+#define BROADCOM_DEV_957414_N225	0x4145
 
 #define BNXT_MAX_MTU		9574
 #define BNXT_NUM_VLANS		2
@@ -297,7 +296,7 @@ struct bnxt_link_info {
 	uint8_t			link_signal_mode;
 	uint16_t		force_pam4_link_speed;
 	uint16_t		support_pam4_speeds;
-	uint16_t		auto_pam4_link_speeds;
+	uint16_t		auto_pam4_link_speed_mask;
 	uint16_t		support_pam4_auto_speeds;
 	uint8_t			req_signal_mode;
 	uint8_t			module_status;
@@ -580,30 +579,6 @@ struct bnxt_rep_info {
 	RTE_ETH_RSS_NONFRAG_IPV6_UDP |	\
 	RTE_ETH_RSS_LEVEL_MASK)
 
-#define BNXT_DEV_TX_OFFLOAD_SUPPORT (RTE_ETH_TX_OFFLOAD_IPV4_CKSUM | \
-				     RTE_ETH_TX_OFFLOAD_TCP_CKSUM | \
-				     RTE_ETH_TX_OFFLOAD_UDP_CKSUM | \
-				     RTE_ETH_TX_OFFLOAD_TCP_TSO | \
-				     RTE_ETH_TX_OFFLOAD_OUTER_IPV4_CKSUM | \
-				     RTE_ETH_TX_OFFLOAD_VXLAN_TNL_TSO | \
-				     RTE_ETH_TX_OFFLOAD_GRE_TNL_TSO | \
-				     RTE_ETH_TX_OFFLOAD_IPIP_TNL_TSO | \
-				     RTE_ETH_TX_OFFLOAD_GENEVE_TNL_TSO | \
-				     RTE_ETH_TX_OFFLOAD_QINQ_INSERT | \
-				     RTE_ETH_TX_OFFLOAD_MULTI_SEGS)
-
-#define BNXT_DEV_RX_OFFLOAD_SUPPORT (RTE_ETH_RX_OFFLOAD_VLAN_FILTER | \
-				     RTE_ETH_RX_OFFLOAD_IPV4_CKSUM | \
-				     RTE_ETH_RX_OFFLOAD_UDP_CKSUM | \
-				     RTE_ETH_RX_OFFLOAD_TCP_CKSUM | \
-				     RTE_ETH_RX_OFFLOAD_OUTER_IPV4_CKSUM | \
-				     RTE_ETH_RX_OFFLOAD_OUTER_UDP_CKSUM | \
-				     RTE_ETH_RX_OFFLOAD_KEEP_CRC | \
-				     RTE_ETH_RX_OFFLOAD_VLAN_EXTEND | \
-				     RTE_ETH_RX_OFFLOAD_TCP_LRO | \
-				     RTE_ETH_RX_OFFLOAD_SCATTER | \
-				     RTE_ETH_RX_OFFLOAD_RSS_HASH)
-
 #define BNXT_HWRM_SHORT_REQ_LEN		sizeof(struct hwrm_short_input)
 
 struct bnxt_flow_stat_info {
@@ -672,7 +647,6 @@ struct bnxt {
 #define BNXT_FLAG_PORT_STATS		BIT(2)
 #define BNXT_FLAG_JUMBO			BIT(3)
 #define BNXT_FLAG_SHORT_CMD		BIT(4)
-#define BNXT_FLAG_UPDATE_HASH		BIT(5)
 #define BNXT_FLAG_PTP_SUPPORTED		BIT(6)
 #define BNXT_FLAG_MULTI_HOST    	BIT(7)
 #define BNXT_FLAG_EXT_RX_PORT_STATS	BIT(8)
@@ -695,9 +669,6 @@ struct bnxt {
 #define BNXT_FLAG_FLOW_XSTATS_EN		BIT(25)
 #define BNXT_FLAG_DFLT_MAC_SET			BIT(26)
 #define BNXT_FLAG_GFID_ENABLE			BIT(27)
-#define BNXT_FLAG_RFS_NEEDS_VNIC		BIT(28)
-#define BNXT_FLAG_FLOW_CFA_RFS_RING_TBL_IDX_V2	BIT(29)
-#define BNXT_RFS_NEEDS_VNIC(bp)	((bp)->flags & BNXT_FLAG_RFS_NEEDS_VNIC)
 #define BNXT_PF(bp)		(!((bp)->flags & BNXT_FLAG_VF))
 #define BNXT_VF(bp)		((bp)->flags & BNXT_FLAG_VF)
 #define BNXT_NPAR(bp)		((bp)->flags & BNXT_FLAG_NPAR_PF)
@@ -834,7 +805,7 @@ struct bnxt {
 	uint16_t		max_tx_rings;
 	uint16_t		max_rx_rings;
 #define MAX_STINGRAY_RINGS		236U
-#define BNXT_MAX_VF_REP_RINGS	8
+#define BNXT_MAX_VF_REP_RINGS	8U
 
 	uint16_t		max_nq_rings;
 	uint16_t		max_l2_ctx;
@@ -891,6 +862,15 @@ struct bnxt {
 	uint16_t		tx_cfa_action;
 	struct bnxt_ring_stats	*prev_rx_ring_stats;
 	struct bnxt_ring_stats	*prev_tx_ring_stats;
+
+#define BNXT_MAX_MC_ADDRS	((bp)->max_mcast_addr)
+	struct rte_ether_addr	*mcast_addr_list;
+	rte_iova_t		mc_list_dma_addr;
+	uint32_t		nb_mc_addr;
+	uint32_t		max_mcast_addr; /* maximum number of mcast filters supported */
+
+	struct rte_eth_rss_conf	rss_conf; /* RSS configuration. */
+	uint16_t		tunnel_disable_flag; /* tunnel stateless offloads status */
 };
 
 static
@@ -1009,10 +989,6 @@ void bnxt_print_link_info(struct rte_eth_dev *eth_dev);
 uint16_t bnxt_rss_hash_tbl_size(const struct bnxt *bp);
 int bnxt_link_update_op(struct rte_eth_dev *eth_dev,
 			int wait_to_complete);
-uint16_t bnxt_dummy_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
-			      uint16_t nb_pkts);
-uint16_t bnxt_dummy_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
-			      uint16_t nb_pkts);
 
 extern const struct rte_flow_ops bnxt_flow_ops;
 
@@ -1063,5 +1039,8 @@ int bnxt_flow_stats_cnt(struct bnxt *bp);
 uint32_t bnxt_get_speed_capabilities(struct bnxt *bp);
 int bnxt_flow_ops_get_op(struct rte_eth_dev *dev,
 			 const struct rte_flow_ops **ops);
+int bnxt_dev_start_op(struct rte_eth_dev *eth_dev);
+int bnxt_dev_stop_op(struct rte_eth_dev *eth_dev);
+void bnxt_handle_vf_cfg_change(void *arg);
 
 #endif

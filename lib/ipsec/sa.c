@@ -7,14 +7,11 @@
 #include <rte_ip.h>
 #include <rte_udp.h>
 #include <rte_errno.h>
-#include <rte_cryptodev.h>
 
 #include "sa.h"
 #include "ipsec_sqn.h"
 #include "crypto.h"
-#include "iph.h"
 #include "misc.h"
-#include "pad.h"
 
 #define MBUF_MAX_L2_LEN		RTE_LEN2MASK(RTE_MBUF_L2_LEN_BITS, uint64_t)
 #define MBUF_MAX_L3_LEN		RTE_LEN2MASK(RTE_MBUF_L3_LEN_BITS, uint64_t)
@@ -362,13 +359,13 @@ esp_outb_tun_init(struct rte_ipsec_sa *sa, const struct rte_ipsec_sa_prm *prm)
 
 	memcpy(sa->hdr, prm->tun.hdr, prm->tun.hdr_len);
 
-	/* insert UDP header if UDP encapsulation is inabled */
+	/* insert UDP header if UDP encapsulation is enabled */
 	if (sa->type & RTE_IPSEC_SATP_NATT_ENABLE) {
 		struct rte_udp_hdr *udph = (struct rte_udp_hdr *)
 				&sa->hdr[prm->tun.hdr_len];
 		sa->hdr_len += sizeof(struct rte_udp_hdr);
-		udph->src_port = prm->ipsec_xform.udp.sport;
-		udph->dst_port = prm->ipsec_xform.udp.dport;
+		udph->src_port = rte_cpu_to_be_16(prm->ipsec_xform.udp.sport);
+		udph->dst_port = rte_cpu_to_be_16(prm->ipsec_xform.udp.dport);
 		udph->dgram_cksum = 0;
 	}
 

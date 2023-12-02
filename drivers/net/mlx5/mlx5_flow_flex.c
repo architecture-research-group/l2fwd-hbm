@@ -205,7 +205,7 @@ mlx5_flex_set_match_sample(void *misc4_m, void *misc4_v,
  * @param dev
  *   Ethernet device to translate flex item on.
  * @param[in, out] matcher
- *   Flow matcher to confgiure
+ *   Flow matcher to configure
  * @param[in, out] key
  *   Flow matcher value.
  * @param[in] item
@@ -382,15 +382,11 @@ mlx5_flex_translate_length(struct mlx5_hca_flex_attr *attr,
 			return rte_flow_error_set
 				(error, EINVAL, RTE_FLOW_ERROR_TYPE_ITEM, NULL,
 				 "unsupported header length field mode (FIXED)");
-		if (attr->header_length_mask_width < field->field_size)
+		if (field->field_size ||
+		    field->offset_mask || field->offset_shift)
 			return rte_flow_error_set
 				(error, EINVAL, RTE_FLOW_ERROR_TYPE_ITEM, NULL,
-				 "header length field width exceeds limit");
-		if (field->offset_shift < 0 ||
-		    field->offset_shift > attr->header_length_mask_width)
-			return rte_flow_error_set
-				(error, EINVAL, RTE_FLOW_ERROR_TYPE_ITEM, NULL,
-				 "invalid header length field shift (FIXED");
+				 "invalid fields for fixed mode");
 		if (field->field_base < 0)
 			return rte_flow_error_set
 				(error, EINVAL, RTE_FLOW_ERROR_TYPE_ITEM, NULL,
@@ -457,7 +453,7 @@ mlx5_flex_translate_length(struct mlx5_hca_flex_attr *attr,
 		if (field->offset_shift > 15 || field->offset_shift < 0)
 			return rte_flow_error_set
 				(error, EINVAL, RTE_FLOW_ERROR_TYPE_ITEM, NULL,
-				 "header length field shift exceeeds limit");
+				 "header length field shift exceeds limit");
 		node->header_length_field_shift	= field->offset_shift;
 		node->header_length_field_offset = field->offset_base;
 	}
@@ -910,7 +906,7 @@ mlx5_flex_translate_sample(struct mlx5_hca_flex_attr *attr,
 	 * offsets in any order.
 	 *
 	 * Gather all similar fields together, build array of bit intervals
-	 * in asсending order and try to cover with the smallest set of sample
+	 * in ascending order and try to cover with the smallest set of sample
 	 * registers.
 	 */
 	memset(&cover, 0, sizeof(cover));
@@ -1153,7 +1149,7 @@ mlx5_flex_translate_conf(struct rte_eth_dev *dev,
 			 struct rte_flow_error *error)
 {
 	struct mlx5_priv *priv = dev->data->dev_private;
-	struct mlx5_hca_flex_attr *attr = &priv->config.hca_attr.flex;
+	struct mlx5_hca_flex_attr *attr = &priv->sh->cdev->config.hca_attr.flex;
 	int ret;
 
 	ret = mlx5_flex_translate_length(attr, conf, devx, error);

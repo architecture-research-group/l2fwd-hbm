@@ -19,12 +19,12 @@
 #include <ethdev_vdev.h>
 #include <rte_malloc.h>
 #include <rte_memcpy.h>
-#include <rte_bus_vdev.h>
+#include <bus_vdev_driver.h>
 #include <rte_kvargs.h>
 #include <rte_spinlock.h>
 
 #include <rte_cycles.h>
-#include <rte_bus_ifpga.h>
+#include <bus_ifpga_driver.h>
 #include <rte_tm_driver.h>
 
 #define IPN3KE_TM_SCRATCH_RW 0
@@ -223,7 +223,7 @@ struct ipn3ke_hw_cap {
 };
 
 /**
- * Strucute to store private data for each representor instance
+ * Structure to store private data for each representor instance
  */
 struct ipn3ke_rpst {
 	TAILQ_ENTRY(ipn3ke_rpst) next;       /**< Next in device list. */
@@ -237,7 +237,7 @@ struct ipn3ke_rpst {
 	uint16_t i40e_pf_eth_port_id;
 	struct rte_eth_link ori_linfo;
 	struct ipn3ke_tm_internals tm;
-	/**< Private data store of assocaiated physical function */
+	/**< Private data store of associated physical function */
 	struct rte_ether_addr mac_addr;
 };
 

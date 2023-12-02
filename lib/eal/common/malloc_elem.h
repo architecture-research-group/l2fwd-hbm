@@ -7,6 +7,8 @@
 
 #include <stdbool.h>
 
+#include <rte_common.h>
+
 #define MIN_DATA_SIZE (RTE_CACHE_LINE_SIZE)
 
 /* dummy definition of struct so we can use pointers to it in malloc_elem struct */
@@ -27,7 +29,13 @@ struct malloc_elem {
 	LIST_ENTRY(malloc_elem) free_list;
 	/**< list of free elements in heap */
 	struct rte_memseg_list *msl;
-	volatile enum elem_state state;
+	/** Element state, @c dirty and @c pad validity depends on it. */
+	/* An extra bit is needed to represent enum elem_state as signed int. */
+	enum elem_state state : 3;
+	/** If state == ELEM_FREE: the memory is not filled with zeroes. */
+	uint32_t dirty : 1;
+	/** Reserved for future use. */
+	uint32_t reserved : 28;
 	uint32_t pad;
 	size_t size;
 	struct malloc_elem *orig_elem;
@@ -124,12 +132,6 @@ malloc_elem_cookies_ok(const struct malloc_elem *elem)
 #define ASAN_MEM_SHIFT(mem) ((void *)((uintptr_t)(mem) >> ASAN_SHADOW_SCALE))
 #define ASAN_MEM_TO_SHADOW(mem) \
 	RTE_PTR_ADD(ASAN_MEM_SHIFT(mem), ASAN_SHADOW_OFFSET)
-
-#if defined(__clang__)
-#define __rte_no_asan __attribute__((no_sanitize("address", "hwaddress")))
-#else
-#define __rte_no_asan __attribute__((no_sanitize_address))
-#endif
 
 __rte_no_asan
 static inline void
@@ -270,7 +272,9 @@ old_malloc_size(struct malloc_elem *elem)
 
 #else /* !RTE_MALLOC_ASAN */
 
-#define __rte_no_asan
+static inline void
+asan_set_zone(void *ptr __rte_unused, size_t len __rte_unused,
+		uint32_t val __rte_unused) { }
 
 static inline void
 asan_set_freezone(void *ptr __rte_unused, size_t size __rte_unused) { }
@@ -320,7 +324,8 @@ malloc_elem_init(struct malloc_elem *elem,
 		struct rte_memseg_list *msl,
 		size_t size,
 		struct malloc_elem *orig_elem,
-		size_t orig_size);
+		size_t orig_size,
+		bool dirty);
 
 void
 malloc_elem_insert(struct malloc_elem *elem);

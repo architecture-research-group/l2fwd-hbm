@@ -22,7 +22,8 @@ is_ms_linker = is_windows and (cc.get_id() == 'clang')
 # depending on the configuration options
 pver = meson.project_version().split('.')
 major_version = '@0@.@1@'.format(pver.get(0), pver.get(1))
-abi_version = run_command(find_program('cat', 'more'), abi_version_file).stdout().strip()
+abi_version = run_command(find_program('cat', 'more'), abi_version_file,
+        check: true).stdout().strip()
 
 # Libraries have the abi_version as the filename extension
 # and have the soname be all but the final part of the abi_version.
@@ -120,6 +121,8 @@ if cpu_instruction_set == 'generic'
         cpu_instruction_set = 'generic'
     elif host_machine.cpu_family().startswith('ppc')
         cpu_instruction_set = 'power8'
+    elif host_machine.cpu_family().startswith('riscv')
+        cpu_instruction_set = 'riscv'
     endif
 endif
 
@@ -223,6 +226,12 @@ if jansson_dep.found()
     dpdk_conf.set('RTE_HAS_JANSSON', 1)
 endif
 
+# check for OpenSSL
+openssl_dep = dependency('openssl', required: false, method: 'pkg-config')
+if openssl_dep.found()
+    dpdk_conf.set('RTE_HAS_OPENSSL', 1)
+endif
+
 # check for pcap
 pcap_dep = dependency('libpcap', required: false, method: 'pkg-config')
 pcap_lib = is_windows ? 'wpcap' : 'pcap'
@@ -246,10 +255,9 @@ endif
 add_project_arguments('-include', 'rte_config.h', language: 'c')
 
 # enable extra warnings and disable any unwanted warnings
+# -Wall is added by default at warning level 1, and -Wextra
+# at warning level 2 (DPDK default)
 warning_flags = [
-        # -Wall is added by meson by default, so add -Wextra only
-        '-Wextra',
-
         # additional warnings in alphabetical order
         '-Wcast-qual',
         '-Wdeprecated',
@@ -307,6 +315,7 @@ endif
 if get_option('mbuf_refcnt_atomic')
     dpdk_conf.set('RTE_MBUF_REFCNT_ATOMIC', true)
 endif
+dpdk_conf.set10('RTE_IOVA_AS_PA', get_option('enable_iova_as_pa'))
 
 compile_time_cpuflags = []
 subdir(arch_subdir)
@@ -334,7 +343,7 @@ if max_lcores == 'detect'
         error('Discovery of max_lcores is not supported for cross-compilation.')
     endif
     # overwrite the default value with discovered values
-    max_lcores = run_command(get_cpu_count_cmd).stdout().to_int()
+    max_lcores = run_command(get_cpu_count_cmd, check: true).stdout().to_int()
     min_lcores = 2
     # DPDK must be built for at least 2 cores
     if max_lcores < min_lcores

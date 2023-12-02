@@ -21,7 +21,7 @@
 #include <ethdev_vdev.h>
 #include <rte_malloc.h>
 #include <rte_kvargs.h>
-#include <rte_bus_vdev.h>
+#include <bus_vdev_driver.h>
 #include <rte_string_fns.h>
 #include <rte_errno.h>
 #include <rte_memory.h>
@@ -55,7 +55,7 @@ static const char * const valid_arguments[] = {
 };
 
 static const struct rte_eth_link pmd_link = {
-	.link_speed = RTE_ETH_SPEED_NUM_10G,
+	.link_speed = RTE_ETH_SPEED_NUM_100G,
 	.link_duplex = RTE_ETH_LINK_FULL_DUPLEX,
 	.link_status = RTE_ETH_LINK_DOWN,
 	.link_autoneg = RTE_ETH_LINK_AUTONEG
@@ -88,17 +88,14 @@ memif_mp_send_region(const struct rte_mp_msg *msg, const void *peer)
 	const struct mp_region_msg *msg_param = (const struct mp_region_msg *)msg->param;
 	struct rte_mp_msg reply;
 	struct mp_region_msg *reply_param = (struct mp_region_msg *)reply.param;
-	uint16_t port_id;
-	int ret;
 
 	/* Get requested port */
-	ret = rte_eth_dev_get_port_by_name(msg_param->port_name, &port_id);
-	if (ret) {
+	dev = rte_eth_dev_get_by_name(msg_param->port_name);
+	if (!dev) {
 		MIF_LOG(ERR, "Failed to get port id for %s",
 			msg_param->port_name);
 		return -1;
 	}
-	dev = &rte_eth_devices[port_id];
 	proc_private = dev->process_private;
 
 	memset(&reply, 0, sizeof(reply));
@@ -351,13 +348,13 @@ eth_memif_rx(void *queue, struct rte_mbuf **bufs, uint16_t nb_pkts)
 			goto no_free_bufs;
 		mbuf = mbuf_head;
 		mbuf->port = mq->in_port;
+		dst_off = 0;
 
 next_slot:
 		s0 = cur_slot & mask;
 		d0 = &ring->desc[s0];
 
 		src_len = d0->length;
-		dst_off = 0;
 		src_off = 0;
 
 		do {
@@ -1026,7 +1023,7 @@ memif_regions_init(struct rte_eth_dev *dev)
 		if (ret < 0)
 			return ret;
 	} else {
-		/* create one memory region contaning rings and buffers */
+		/* create one memory region containing rings and buffers */
 		ret = memif_region_init_shm(dev, /* has buffers */ 1);
 		if (ret < 0)
 			return ret;
@@ -1447,8 +1444,8 @@ memif_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 	stats->opackets = 0;
 	stats->obytes = 0;
 
-	tmp = (pmd->role == MEMIF_ROLE_CLIENT) ? pmd->run.num_c2s_rings :
-	    pmd->run.num_s2c_rings;
+	tmp = (pmd->role == MEMIF_ROLE_CLIENT) ? pmd->run.num_s2c_rings :
+	    pmd->run.num_c2s_rings;
 	nq = (tmp < RTE_ETHDEV_QUEUE_STAT_CNTRS) ? tmp :
 	    RTE_ETHDEV_QUEUE_STAT_CNTRS;
 
@@ -1461,8 +1458,8 @@ memif_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 		stats->ibytes += mq->n_bytes;
 	}
 
-	tmp = (pmd->role == MEMIF_ROLE_CLIENT) ? pmd->run.num_s2c_rings :
-	    pmd->run.num_c2s_rings;
+	tmp = (pmd->role == MEMIF_ROLE_CLIENT) ? pmd->run.num_c2s_rings :
+	    pmd->run.num_s2c_rings;
 	nq = (tmp < RTE_ETHDEV_QUEUE_STAT_CNTRS) ? tmp :
 	    RTE_ETHDEV_QUEUE_STAT_CNTRS;
 
@@ -1500,23 +1497,6 @@ memif_stats_reset(struct rte_eth_dev *dev)
 	return 0;
 }
 
-static int
-memif_rx_queue_intr_enable(struct rte_eth_dev *dev __rte_unused,
-			   uint16_t qid __rte_unused)
-{
-	MIF_LOG(WARNING, "Interrupt mode not supported.");
-
-	return -1;
-}
-
-static int
-memif_rx_queue_intr_disable(struct rte_eth_dev *dev, uint16_t qid __rte_unused)
-{
-	struct pmd_internals *pmd __rte_unused = dev->data->dev_private;
-
-	return 0;
-}
-
 static const struct eth_dev_ops ops = {
 	.dev_start = memif_dev_start,
 	.dev_stop = memif_dev_stop,
@@ -1527,8 +1507,6 @@ static const struct eth_dev_ops ops = {
 	.rx_queue_setup = memif_rx_queue_setup,
 	.rx_queue_release = memif_rx_queue_release,
 	.tx_queue_release = memif_tx_queue_release,
-	.rx_queue_intr_enable = memif_rx_queue_intr_enable,
-	.rx_queue_intr_disable = memif_rx_queue_intr_disable,
 	.link_update = memif_link_update,
 	.stats_get = memif_stats_get,
 	.stats_reset = memif_stats_reset,
@@ -1731,8 +1709,7 @@ memif_check_socket_filename(const char *filename)
 		ret = -EINVAL;
 	}
 
-	if (dir != NULL)
-		rte_free(dir);
+	rte_free(dir);
 
 	return ret;
 }
@@ -1903,8 +1880,7 @@ rte_pmd_memif_probe(struct rte_vdev_device *vdev)
 			   log2_ring_size, pkt_buffer_size, secret, ether_addr);
 
 exit:
-	if (kvlist != NULL)
-		rte_kvargs_free(kvlist);
+	rte_kvargs_free(kvlist);
 	return ret;
 }
 

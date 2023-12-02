@@ -14,16 +14,28 @@
 #include <rte_random.h>
 #include <rte_byteorder.h>
 #include <rte_errno.h>
+#include "test.h"
+
+#if !defined(RTE_LIB_BPF)
+
+static int
+test_bpf(void)
+{
+	printf("BPF not supported, skipping test\n");
+	return TEST_SKIPPED;
+}
+
+#else
+
 #include <rte_bpf.h>
 #include <rte_ether.h>
 #include <rte_ip.h>
 
-#include "test.h"
 
 /*
  * Basic functional tests for librte_bpf.
  * The main procedure - load eBPF program, execute it and
- * compare restuls with expected values.
+ * compare results with expected values.
  */
 
 struct dummy_offset {
@@ -2588,7 +2600,7 @@ dummy_mbuf_prep(struct rte_mbuf *mb, uint8_t buf[], uint32_t buf_len,
 	uint8_t *db;
 
 	mb->buf_addr = buf;
-	mb->buf_iova = (uintptr_t)buf;
+	rte_mbuf_iova_set(mb, (uintptr_t)buf);
 	mb->buf_len = buf_len;
 	rte_mbuf_refcnt_set(mb, 1);
 
@@ -2707,7 +2719,7 @@ test_ld_mbuf1_check(uint64_t rc, const void *arg)
 }
 
 /*
- * same as ld_mbuf1, but then trancate the mbuf by 1B,
+ * same as ld_mbuf1, but then truncate the mbuf by 1B,
  * so load of last 4B fail.
  */
 static void
@@ -3248,9 +3260,20 @@ test_bpf(void)
 	return rc;
 }
 
+#endif /* !RTE_LIB_BPF */
+
 REGISTER_TEST_COMMAND(bpf_autotest, test_bpf);
 
-#ifdef RTE_HAS_LIBPCAP
+#ifndef RTE_HAS_LIBPCAP
+
+static int
+test_bpf_convert(void)
+{
+	printf("BPF convert RTE_HAS_LIBPCAP is undefined, skipping test\n");
+	return TEST_SKIPPED;
+}
+
+#else
 #include <pcap/pcap.h>
 
 static void
@@ -3259,8 +3282,10 @@ test_bpf_dump(struct bpf_program *cbf, const struct rte_bpf_prm *prm)
 	printf("cBPF program (%u insns)\n", cbf->bf_len);
 	bpf_dump(cbf, 1);
 
-	printf("\neBPF program (%u insns)\n", prm->nb_ins);
-	rte_bpf_dump(stdout, prm->ins, prm->nb_ins);
+	if (prm != NULL) {
+		printf("\neBPF program (%u insns)\n", prm->nb_ins);
+		rte_bpf_dump(stdout, prm->ins, prm->nb_ins);
+	}
 }
 
 static int
@@ -3446,5 +3471,6 @@ test_bpf_convert(void)
 	return rc;
 }
 
-REGISTER_TEST_COMMAND(bpf_convert_autotest, test_bpf_convert);
 #endif /* RTE_HAS_LIBPCAP */
+
+REGISTER_TEST_COMMAND(bpf_convert_autotest, test_bpf_convert);

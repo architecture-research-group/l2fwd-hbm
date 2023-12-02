@@ -752,6 +752,8 @@ int bnxt_alloc_hwrm_rings(struct bnxt *bp)
 		rc = bnxt_alloc_hwrm_rx_ring(bp, i);
 		if (rc)
 			goto err_out;
+		bnxt_hwrm_set_ring_coal(bp, &coal,
+					rxq->cp_ring->cp_ring_struct->fw_ring_id);
 	}
 
 	/* If something is wrong with Rx ring alloc, skip Tx ring alloc */
@@ -851,6 +853,7 @@ int bnxt_alloc_async_ring_struct(struct bnxt *bp)
 	ring->ring_mask = ring->ring_size - 1;
 	ring->vmem_size = 0;
 	ring->vmem = NULL;
+	ring->fw_ring_id = INVALID_HW_RING_ID;
 
 	bp->async_cp_ring = cpr;
 	cpr->cp_ring_struct = ring;

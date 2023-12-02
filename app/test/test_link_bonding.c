@@ -47,8 +47,8 @@
 #define MBUF_CACHE_SIZE (250)
 #define BURST_SIZE (32)
 
-#define RTE_TEST_RX_DESC_MAX	(2048)
-#define RTE_TEST_TX_DESC_MAX	(2048)
+#define RX_DESC_MAX	(2048)
+#define TX_DESC_MAX	(2048)
 #define MAX_PKT_BURST			(512)
 #define DEF_PKT_BURST			(16)
 
@@ -135,7 +135,6 @@ static uint16_t vlan_id = 0x100;
 static struct rte_eth_conf default_pmd_conf = {
 	.rxmode = {
 		.mq_mode = RTE_ETH_MQ_RX_NONE,
-		.split_hdr_size = 0,
 	},
 	.txmode = {
 		.mq_mode = RTE_ETH_MQ_TX_NONE,
@@ -181,6 +180,10 @@ configure_ethdev(uint16_t port_id, uint8_t start, uint8_t en_isr)
 			test_params->nb_tx_q, &default_pmd_conf),
 			"rte_eth_dev_configure for port %d failed", port_id);
 
+	int ret = rte_eth_dev_set_mtu(port_id, 1550);
+	RTE_TEST_ASSERT(ret == 0 || ret == -ENOTSUP,
+			"rte_eth_dev_set_mtu for port %d failed", port_id);
+
 	for (q_id = 0; q_id < test_params->nb_rx_q; q_id++)
 		TEST_ASSERT_SUCCESS(rte_eth_rx_queue_setup(port_id, q_id, RX_RING_SIZE,
 				rte_eth_dev_socket_id(port_id), &rx_conf_default,
@@ -221,8 +224,8 @@ test_setup(void)
 				"Ethernet header struct allocation failed!");
 	}
 
-	nb_mbuf_per_pool = RTE_TEST_RX_DESC_MAX + DEF_PKT_BURST +
-			RTE_TEST_TX_DESC_MAX + MAX_PKT_BURST;
+	nb_mbuf_per_pool = RX_DESC_MAX + DEF_PKT_BURST +
+			TX_DESC_MAX + MAX_PKT_BURST;
 	if (test_params->mbuf_pool == NULL) {
 		test_params->mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL",
 			nb_mbuf_per_pool, MBUF_CACHE_SIZE, 0,
@@ -1639,8 +1642,7 @@ test_roundrobin_rx_burst_on_single_slave(void)
 
 	/* free mbufs */
 	for (i = 0; i < MAX_PKT_BURST; i++) {
-		if (rx_pkt_burst[i] != NULL)
-			rte_pktmbuf_free(rx_pkt_burst[i]);
+		rte_pktmbuf_free(rx_pkt_burst[i]);
 	}
 
 
@@ -1722,8 +1724,7 @@ test_roundrobin_rx_burst_on_multiple_slaves(void)
 
 	/* free mbufs */
 	for (i = 0; i < MAX_PKT_BURST; i++) {
-		if (rx_pkt_burst[i] != NULL)
-			rte_pktmbuf_free(rx_pkt_burst[i]);
+		rte_pktmbuf_free(rx_pkt_burst[i]);
 	}
 
 	/* Clean up and remove slaves from bonded device */
@@ -2010,8 +2011,7 @@ test_roundrobin_verify_slave_link_status_change_behaviour(void)
 
 	/* free mbufs */
 	for (i = 0; i < MAX_PKT_BURST; i++) {
-		if (rx_pkt_burst[i] != NULL)
-			rte_pktmbuf_free(rx_pkt_burst[i]);
+		rte_pktmbuf_free(rx_pkt_burst[i]);
 	}
 
 	/* Clean up and remove slaves from bonded device */

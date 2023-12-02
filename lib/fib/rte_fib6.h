@@ -17,7 +17,6 @@
 
 #include <stdint.h>
 
-#include <rte_compat.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -114,9 +113,8 @@ rte_fib6_find_existing(const char *name);
  * Free an FIB object.
  *
  * @param fib
- *   FIB object handle
- * @return
- *   None
+ *   FIB object handle created by rte_fib6_create().
+ *   If fib is NULL, no operation is performed.
  */
 void
 rte_fib6_free(struct rte_fib6 *fib);
@@ -184,7 +182,7 @@ rte_fib6_lookup_bulk(struct rte_fib6 *fib,
  *   FIB6 object handle
  * @return
  *   Pointer on the dataplane struct on success
- *   NULL othervise
+ *   NULL otherwise
  */
 void *
 rte_fib6_get_dp(struct rte_fib6 *fib);
@@ -196,7 +194,7 @@ rte_fib6_get_dp(struct rte_fib6 *fib);
  *   FIB object handle
  * @return
  *   Pointer on the RIB6 on success
- *   NULL othervise
+ *   NULL otherwise
  */
 struct rte_rib6 *
 rte_fib6_get_rib(struct rte_fib6 *fib);

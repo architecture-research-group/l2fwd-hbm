@@ -2,6 +2,8 @@
  * Copyright(c) 2018 Intel Corporation
  */
 
+#include <stdlib.h>
+
 #include <rte_malloc.h>
 #include <rte_eal.h>
 #include <rte_log.h>
@@ -75,7 +77,7 @@ main_loop(struct cperf_verify_ctx *ctx, enum rte_comp_xform_type type)
 
 	if (ops == NULL) {
 		RTE_LOG(ERR, USER1,
-			"Can't allocate memory for ops strucures\n");
+			"Can't allocate memory for ops structures\n");
 		return -1;
 	}
 

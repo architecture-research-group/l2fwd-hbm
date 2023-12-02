@@ -37,7 +37,7 @@ using ``rte_rawdev_queue_conf_get()``.
 
 To perform data transfer use standard ``rte_rawdev_enqueue_buffers()`` and
 ``rte_rawdev_dequeue_buffers()`` APIs. Not all messages produce sensible
-responses hence dequeueing is not always necessary.
+responses hence dequeuing is not always necessary.
 
 BPHY CGX/RPM PMD
 ----------------
@@ -99,6 +99,38 @@ Message is used to start or stop accepting traffic.
 Message must have type set to ``CNXK_BPHY_CGX_MSG_TYPE_START_RXTX`` or
 ``CNXK_BPHY_CGX_MSG_TYPE_STOP_RXTX``. Former will enable traffic while the latter will
 do the opposite.
+
+Change mode from eCPRI to CPRI
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Message is used to change operating mode from eCPRI to CPRI along with other
+settings.
+
+Message must have type set to ``CNXK_BPHY_CGX_MSG_TYPE_CPRI_MODE_CHANGE``.
+Prior to sending actual message payload i.e
+``struct cnxk_bphy_cgx_msg_cpri_mode_change`` needs to be filled with relevant
+information.
+
+Enable TX for CPRI SERDES
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Message is used to enable TX for SERDES configured in CPRI mode.
+
+Message must have type set to ``CNXK_BPHY_CGX_MSG_TYPE_CPRI_TX_CONTROL``.
+Prior to sending actual message payload i.e
+``struct cnxk_bphy_cgx_msg_cpri_mode_tx_ctrl`` needs to be filled with relevant
+information.
+
+Change CPRI misc settings
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Message is used to change misc CPRI settings, for example to reset RX state
+machine on CPRI SERDES.
+
+Message must have type set to ``CNXK_BPHY_CGX_MSG_TYPE_CPRI_MODE_MISC``.
+Prior to sending actual message payload i.e
+``struct cnxk_bphy_cgx_msg_cpri_mode_misc`` needs to be filled with relevant
+information.
 
 BPHY PMD
 --------

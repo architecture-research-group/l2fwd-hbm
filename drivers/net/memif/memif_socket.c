@@ -17,7 +17,7 @@
 #include <ethdev_vdev.h>
 #include <rte_malloc.h>
 #include <rte_kvargs.h>
-#include <rte_bus_vdev.h>
+#include <bus_vdev_driver.h>
 #include <rte_hash.h>
 #include <rte_jhash.h>
 #include <rte_string_fns.h>
@@ -402,11 +402,10 @@ memif_msg_enq_init(struct rte_eth_dev *dev)
 {
 	struct pmd_internals *pmd = dev->data->dev_private;
 	struct memif_msg_queue_elt *e = memif_msg_enq(pmd->cc);
-	memif_msg_init_t *i = &e->msg.init;
+	memif_msg_init_t *i;
 
 	if (e == NULL)
 		return -1;
-
 	i = &e->msg.init;
 	e->msg.type = MEMIF_MSG_TYPE_INIT;
 	i->version = MEMIF_VERSION;
@@ -726,7 +725,7 @@ memif_msg_receive(struct memif_control_channel *cc)
 		break;
 	case MEMIF_MSG_TYPE_INIT:
 		/*
-		 * This cc does not have an interface asociated with it.
+		 * This cc does not have an interface associated with it.
 		 * If suitable interface is found it will be assigned here.
 		 */
 		ret = memif_msg_receive_init(cc, &msg);

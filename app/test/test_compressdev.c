@@ -1256,7 +1256,7 @@ test_deflate_comp_run(const struct interim_data_params *int_data,
 		/*
 		 * Store original operation index in private data,
 		 * since ordering does not have to be maintained,
-		 * when dequeueing from compressdev, so a comparison
+		 * when dequeuing from compressdev, so a comparison
 		 * at the end of the test can be done.
 		 */
 		priv_data = (struct priv_op_data *) (ops[i] + 1);
@@ -2144,8 +2144,7 @@ exit:
 
 	if (stream != NULL)
 		rte_compressdev_stream_free(0, stream);
-	if (all_decomp_data != NULL)
-		rte_free(all_decomp_data);
+	rte_free(all_decomp_data);
 
 	/* Free compress private xforms */
 	for (i = 0; i < test_priv_data.num_priv_xforms; i++) {

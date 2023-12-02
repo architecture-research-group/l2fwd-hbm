@@ -78,14 +78,14 @@ hns3_get_mbx_resp(struct hns3_hw *hw, uint16_t code, uint16_t subcode,
 	mbx_time_limit = (uint32_t)hns->mbx_time_limit_ms * US_PER_MS;
 	while (wait_time < mbx_time_limit) {
 		if (__atomic_load_n(&hw->reset.disable_cmd, __ATOMIC_RELAXED)) {
-			hns3_err(hw, "Don't wait for mbx respone because of "
+			hns3_err(hw, "Don't wait for mbx response because of "
 				 "disable_cmd");
 			return -EBUSY;
 		}
 
 		if (is_reset_pending(hns)) {
 			hw->mbx_resp.req_msg_data = 0;
-			hns3_err(hw, "Don't wait for mbx respone because of "
+			hns3_err(hw, "Don't wait for mbx response because of "
 				 "reset pending");
 			return -EIO;
 		}
@@ -429,15 +429,17 @@ hns3_handle_mbx_msg_out_intr(struct hns3_hw *hw)
 			 * Clear opcode to inform intr thread don't process
 			 * again.
 			 */
-			crq->desc[crq->next_to_use].opcode = 0;
+			crq->desc[next_to_use].opcode = 0;
 		}
 
 scan_next:
 		next_to_use = (next_to_use + 1) % hw->cmq.crq.desc_num;
 	}
 
-	crq->next_to_use = next_to_use;
-	hns3_write_dev(hw, HNS3_CMDQ_RX_HEAD_REG, crq->next_to_use);
+	/*
+	 * Note: the crq->next_to_use field should not updated, otherwise,
+	 * mailbox messages may be discarded.
+	 */
 }
 
 void

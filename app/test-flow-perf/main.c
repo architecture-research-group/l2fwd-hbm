@@ -16,6 +16,7 @@
  * gives packet per second measurement.
  */
 
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,15 @@
 #define DEFAULT_RULES_BATCH     100000
 #define DEFAULT_GROUP                0
 
+#define HAIRPIN_RX_CONF_FORCE_MEMORY  (0x0001)
+#define HAIRPIN_TX_CONF_FORCE_MEMORY  (0x0002)
+
+#define HAIRPIN_RX_CONF_LOCKED_MEMORY (0x0010)
+#define HAIRPIN_RX_CONF_RTE_MEMORY    (0x0020)
+
+#define HAIRPIN_TX_CONF_LOCKED_MEMORY (0x0100)
+#define HAIRPIN_TX_CONF_RTE_MEMORY    (0x0200)
+
 struct rte_flow *flow;
 static uint8_t flow_group;
 
@@ -60,6 +70,7 @@ static uint32_t policy_id[MAX_PORTS];
 static uint8_t items_idx, actions_idx, attrs_idx;
 
 static uint64_t ports_mask;
+static uint64_t hairpin_conf_mask;
 static uint16_t dst_ports[RTE_MAX_ETHPORTS];
 static volatile bool force_quit;
 static bool dump_iterations;
@@ -481,6 +492,7 @@ usage(char *progname)
 	printf("  --enable-fwd: To enable packets forwarding"
 		" after insertion\n");
 	printf("  --portmask=N: hexadecimal bitmask of ports used\n");
+	printf("  --hairpin-conf=0xXXXX: hexadecimal bitmask of hairpin queue configuration\n");
 	printf("  --random-priority=N,S: use random priority levels "
 		"from 0 to (N - 1) for flows "
 		"and S as seed for pseudo-random number generator\n");
@@ -628,6 +640,7 @@ static void
 args_parse(int argc, char **argv)
 {
 	uint64_t pm, seed;
+	uint64_t hp_conf;
 	char **argvopt;
 	uint32_t prio;
 	char *token;
@@ -647,6 +660,7 @@ args_parse(int argc, char **argv)
 		{ "enable-fwd",                 0, 0, 0 },
 		{ "unique-data",                0, 0, 0 },
 		{ "portmask",                   1, 0, 0 },
+		{ "hairpin-conf",               1, 0, 0 },
 		{ "cores",                      1, 0, 0 },
 		{ "random-priority",            1, 0, 0 },
 		{ "meter-profile-alg",          1, 0, 0 },
@@ -878,6 +892,13 @@ args_parse(int argc, char **argv)
 				if ((optarg[0] == '\0') || (end == NULL) || (*end != '\0'))
 					rte_exit(EXIT_FAILURE, "Invalid fwd port mask\n");
 				ports_mask = pm;
+			}
+			if (strcmp(lgopts[opt_idx].name, "hairpin-conf") == 0) {
+				end = NULL;
+				hp_conf = strtoull(optarg, &end, 16);
+				if ((optarg[0] == '\0') || (end == NULL) || (*end != '\0'))
+					rte_exit(EXIT_FAILURE, "Invalid hairpin config mask\n");
+				hairpin_conf_mask = hp_conf;
 			}
 			if (strcmp(lgopts[opt_idx].name,
 					"port-id") == 0) {
@@ -1519,7 +1540,7 @@ dump_used_cpu_time(const char *item,
 	 * threads time.
 	 *
 	 * Throughput: total count of rte rules divided
-	 * over the average of the time cosumed by all
+	 * over the average of the time consumed by all
 	 * threads time.
 	 */
 	double insertion_latency_time;
@@ -1713,36 +1734,6 @@ do_tx(struct lcore_info *li, uint16_t cnt, uint16_t tx_port,
 		rte_pktmbuf_free(li->pkts[i]);
 }
 
-/*
- * Method to convert numbers into pretty numbers that easy
- * to read. The design here is to add comma after each three
- * digits and set all of this inside buffer.
- *
- * For example if n = 1799321, the output will be
- * 1,799,321 after this method which is easier to read.
- */
-static char *
-pretty_number(uint64_t n, char *buf)
-{
-	char p[6][4];
-	int i = 0;
-	int off = 0;
-
-	while (n > 1000) {
-		sprintf(p[i], "%03d", (int)(n % 1000));
-		n /= 1000;
-		i += 1;
-	}
-
-	sprintf(p[i++], "%d", (int)n);
-
-	while (i--)
-		off += sprintf(buf + off, "%s,", p[i]);
-	buf[strlen(buf) - 1] = '\0';
-
-	return buf;
-}
-
 static void
 packet_per_second_stats(void)
 {
@@ -1764,7 +1755,6 @@ packet_per_second_stats(void)
 		uint64_t total_rx_pkts = 0;
 		uint64_t total_tx_drops = 0;
 		uint64_t tx_delta, rx_delta, drops_delta;
-		char buf[3][32];
 		int nr_valid_core = 0;
 
 		sleep(1);
@@ -1789,10 +1779,8 @@ packet_per_second_stats(void)
 			tx_delta    = li->tx_pkts  - oli->tx_pkts;
 			rx_delta    = li->rx_pkts  - oli->rx_pkts;
 			drops_delta = li->tx_drops - oli->tx_drops;
-			printf("%6d %16s %16s %16s\n", i,
-				pretty_number(tx_delta,    buf[0]),
-				pretty_number(drops_delta, buf[1]),
-				pretty_number(rx_delta,    buf[2]));
+			printf("%6d %'16"PRId64" %'16"PRId64" %'16"PRId64"\n",
+				i, tx_delta, drops_delta, rx_delta);
 
 			total_tx_pkts  += tx_delta;
 			total_rx_pkts  += rx_delta;
@@ -1803,10 +1791,9 @@ packet_per_second_stats(void)
 		}
 
 		if (nr_valid_core > 1) {
-			printf("%6s %16s %16s %16s\n", "total",
-				pretty_number(total_tx_pkts,  buf[0]),
-				pretty_number(total_tx_drops, buf[1]),
-				pretty_number(total_rx_pkts,  buf[2]));
+			printf("%6s %'16"PRId64" %'16"PRId64" %'16"PRId64"\n",
+				"total", total_tx_pkts, total_tx_drops,
+				total_rx_pkts);
 			nr_lines += 1;
 		}
 
@@ -2068,6 +2055,12 @@ init_port(void)
 				hairpin_conf.peers[0].port = port_id;
 				hairpin_conf.peers[0].queue =
 					std_queue + tx_queues_count;
+				hairpin_conf.use_locked_device_memory =
+					!!(hairpin_conf_mask & HAIRPIN_RX_CONF_LOCKED_MEMORY);
+				hairpin_conf.use_rte_memory =
+					!!(hairpin_conf_mask & HAIRPIN_RX_CONF_RTE_MEMORY);
+				hairpin_conf.force_memory =
+					!!(hairpin_conf_mask & HAIRPIN_RX_CONF_FORCE_MEMORY);
 				ret = rte_eth_rx_hairpin_queue_setup(
 						port_id, hairpin_queue,
 						rxd_count, &hairpin_conf);
@@ -2083,6 +2076,12 @@ init_port(void)
 				hairpin_conf.peers[0].port = port_id;
 				hairpin_conf.peers[0].queue =
 					std_queue + rx_queues_count;
+				hairpin_conf.use_locked_device_memory =
+					!!(hairpin_conf_mask & HAIRPIN_TX_CONF_LOCKED_MEMORY);
+				hairpin_conf.use_rte_memory =
+					!!(hairpin_conf_mask & HAIRPIN_TX_CONF_RTE_MEMORY);
+				hairpin_conf.force_memory =
+					!!(hairpin_conf_mask & HAIRPIN_TX_CONF_FORCE_MEMORY);
 				ret = rte_eth_tx_hairpin_queue_setup(
 						port_id, hairpin_queue,
 						txd_count, &hairpin_conf);
@@ -2138,6 +2137,9 @@ main(int argc, char **argv)
 	argv += ret;
 	if (argc > 1)
 		args_parse(argc, argv);
+
+	/* For more fancy, localised integer formatting. */
+	setlocale(LC_NUMERIC, "");
 
 	init_port();
 

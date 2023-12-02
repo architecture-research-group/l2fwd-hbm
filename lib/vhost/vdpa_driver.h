@@ -5,6 +5,10 @@
 #ifndef _VDPA_DRIVER_H_
 #define _VDPA_DRIVER_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 #include <rte_compat.h>
@@ -33,6 +37,9 @@ struct rte_vdpa_dev_ops {
 
 	/** Driver close the device (Mandatory) */
 	int (*dev_close)(int vid);
+
+	/** Connection closed, clean up resources */
+	int (*dev_cleanup)(int vid);
 
 	/** Enable/disable this vring (Mandatory) */
 	int (*set_vring_state)(int vid, int vring, int state);
@@ -65,8 +72,15 @@ struct rte_vdpa_dev_ops {
 	/** Reset statistics of the queue */
 	int (*reset_stats)(struct rte_vdpa_device *dev, int qid);
 
-	/** Reserved for future extension */
-	void *reserved[2];
+	/** Get the device configuration space */
+	int (*get_config)(int vid, uint8_t *config, uint32_t size);
+
+	/** Set the device configuration space */
+	int (*set_config)(int vid, uint8_t *config, uint32_t offset,
+		      uint32_t size, uint32_t flags);
+
+	/** get device type: net device, blk device... */
+	int (*get_dev_type)(struct rte_vdpa_device *dev, uint32_t *type);
 };
 
 /**
@@ -78,6 +92,8 @@ struct rte_vdpa_device {
 	struct rte_device *device;
 	/** vdpa device operations */
 	struct rte_vdpa_dev_ops *ops;
+	/** vdpa device type: net, blk... */
+	uint32_t type;
 };
 
 /**
@@ -140,5 +156,9 @@ rte_vhost_host_notifier_ctrl(int vid, uint16_t qid, bool enable);
 __rte_internal
 int
 rte_vdpa_relay_vring_used(int vid, uint16_t qid, void *vring_m);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _VDPA_DRIVER_H_ */

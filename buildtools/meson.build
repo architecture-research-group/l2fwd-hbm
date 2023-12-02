@@ -31,6 +31,9 @@ if host_machine.system() == 'windows'
         pmdinfo += 'llvm-ar'
     endif
     pmdinfogen += 'coff'
+elif host_machine.system() == 'freebsd'
+    pmdinfo += 'llvm-ar'
+    pmdinfogen += 'elf'
 else
     pmdinfo += 'ar'
     pmdinfogen += 'elf'
@@ -45,7 +48,7 @@ if host_machine.system() != 'windows'
 endif
 foreach module : python3_required_modules
     script = 'import importlib.util; import sys; exit(importlib.util.find_spec("@0@") is None)'
-    if run_command(py3, '-c', script.format(module)).returncode() != 0
+    if run_command(py3, '-c', script.format(module), check: false).returncode() != 0
         error('missing python module: @0@'.format(module))
     endif
 endforeach

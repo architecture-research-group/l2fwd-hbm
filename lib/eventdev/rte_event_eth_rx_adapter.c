@@ -2,6 +2,8 @@
  * Copyright(c) 2017 Intel Corporation.
  * All rights reserved.
  */
+#include <ctype.h>
+#include <stdlib.h>
 #if defined(LINUX)
 #include <sys/epoll.h>
 #endif
@@ -9,7 +11,7 @@
 
 #include <rte_cycles.h>
 #include <rte_common.h>
-#include <rte_dev.h>
+#include <dev_driver.h>
 #include <rte_errno.h>
 #include <ethdev_driver.h>
 #include <rte_log.h>
@@ -290,6 +292,30 @@ rxa_event_buf_get(struct event_eth_rx_adapter *rx_adapter, uint16_t eth_dev_id,
 	if (!rxa_validate_id(id)) { \
 		RTE_EDEV_LOG_ERR("Invalid eth Rx adapter id = %d\n", id); \
 		return retval; \
+	} \
+} while (0)
+
+#define RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_GOTO_ERR_RET(id, retval) do { \
+	if (!rxa_validate_id(id)) { \
+		RTE_EDEV_LOG_ERR("Invalid eth Rx adapter id = %d\n", id); \
+		ret = retval; \
+		goto error; \
+	} \
+} while (0)
+
+#define RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, retval) do { \
+	if ((token) == NULL || strlen(token) == 0 || !isdigit(*token)) { \
+		RTE_EDEV_LOG_ERR("Invalid eth Rx adapter token\n"); \
+		ret = retval; \
+		goto error; \
+	} \
+} while (0)
+
+#define RTE_ETH_VALID_PORTID_OR_GOTO_ERR_RET(port_id, retval) do { \
+	if (!rte_eth_dev_is_valid_port(port_id)) { \
+		RTE_ETHDEV_LOG(ERR, "Invalid port_id=%u\n", port_id); \
+		ret = retval; \
+		goto error; \
 	} \
 } while (0)
 
@@ -831,6 +857,7 @@ rxa_init_vector(struct event_eth_rx_adapter *rx_adapter,
 	vec->vector_ev->port = vec->port;
 	vec->vector_ev->queue = vec->queue;
 	vec->vector_ev->attr_valid = true;
+	vec->vector_ev->elem_offset = 0;
 	TAILQ_INSERT_TAIL(&rx_adapter->vector_list, vec, next);
 }
 
@@ -1157,7 +1184,7 @@ rxa_intr_thread(void *arg)
 /* Dequeue <port, q> from interrupt ring and enqueue received
  * mbufs to eventdev
  */
-static inline void
+static inline bool
 rxa_intr_ring_dequeue(struct event_eth_rx_adapter *rx_adapter)
 {
 	uint32_t n;
@@ -1167,20 +1194,27 @@ rxa_intr_ring_dequeue(struct event_eth_rx_adapter *rx_adapter)
 	struct rte_event_eth_rx_adapter_stats *stats;
 	rte_spinlock_t *ring_lock;
 	uint8_t max_done = 0;
+	bool work = false;
 
 	if (rx_adapter->num_rx_intr == 0)
-		return;
+		return work;
 
 	if (rte_ring_count(rx_adapter->intr_ring) == 0
 		&& !rx_adapter->qd_valid)
-		return;
+		return work;
 
 	buf = &rx_adapter->event_enqueue_buffer;
 	stats = &rx_adapter->stats;
 	ring_lock = &rx_adapter->intr_ring_lock;
 
-	if (buf->count >= BATCH_SIZE)
-		rxa_flush_event_buffer(rx_adapter, buf, stats);
+	if (buf->count >= BATCH_SIZE) {
+		uint16_t n;
+
+		n = rxa_flush_event_buffer(rx_adapter, buf, stats);
+
+		if (likely(n > 0))
+			work = true;
+	}
 
 	while (rxa_pkt_buf_available(buf)) {
 		struct eth_device_info *dev_info;
@@ -1262,7 +1296,12 @@ rxa_intr_ring_dequeue(struct event_eth_rx_adapter *rx_adapter)
 	}
 
 done:
-	rx_adapter->stats.rx_intr_packets += nb_rx;
+	if (nb_rx > 0) {
+		rx_adapter->stats.rx_intr_packets += nb_rx;
+		work = true;
+	}
+
+	return work;
 }
 
 /*
@@ -1278,7 +1317,7 @@ done:
  * the hypervisor's switching layer where adjustments can be made to deal with
  * it.
  */
-static inline void
+static inline bool
 rxa_poll(struct event_eth_rx_adapter *rx_adapter)
 {
 	uint32_t num_queue;
@@ -1287,6 +1326,7 @@ rxa_poll(struct event_eth_rx_adapter *rx_adapter)
 	struct rte_event_eth_rx_adapter_stats *stats = NULL;
 	uint32_t wrr_pos;
 	uint32_t max_nb_rx;
+	bool work = false;
 
 	wrr_pos = rx_adapter->wrr_pos;
 	max_nb_rx = rx_adapter->max_nb_rx;
@@ -1302,14 +1342,20 @@ rxa_poll(struct event_eth_rx_adapter *rx_adapter)
 		/* Don't do a batch dequeue from the rx queue if there isn't
 		 * enough space in the enqueue buffer.
 		 */
-		if (buf->count >= BATCH_SIZE)
-			rxa_flush_event_buffer(rx_adapter, buf, stats);
+		if (buf->count >= BATCH_SIZE) {
+			uint16_t n;
+
+			n = rxa_flush_event_buffer(rx_adapter, buf, stats);
+
+			if (likely(n > 0))
+				work = true;
+		}
 		if (!rxa_pkt_buf_available(buf)) {
 			if (rx_adapter->use_queue_event_buf)
 				goto poll_next_entry;
 			else {
 				rx_adapter->wrr_pos = wrr_pos;
-				return;
+				break;
 			}
 		}
 
@@ -1325,6 +1371,11 @@ poll_next_entry:
 		if (++wrr_pos == rx_adapter->wrr_len)
 			wrr_pos = 0;
 	}
+
+	if (nb_rx > 0)
+		work = true;
+
+	return work;
 }
 
 static void
@@ -1357,12 +1408,14 @@ static int
 rxa_service_func(void *args)
 {
 	struct event_eth_rx_adapter *rx_adapter = args;
+	bool intr_work;
+	bool poll_work;
 
 	if (rte_spinlock_trylock(&rx_adapter->rx_lock) == 0)
-		return 0;
+		return -EAGAIN;
 	if (!rx_adapter->rxa_started) {
 		rte_spinlock_unlock(&rx_adapter->rx_lock);
-		return 0;
+		return -EAGAIN;
 	}
 
 	if (rx_adapter->ena_vector) {
@@ -1383,23 +1436,21 @@ rxa_service_func(void *args)
 		}
 	}
 
-	rxa_intr_ring_dequeue(rx_adapter);
-	rxa_poll(rx_adapter);
+	intr_work = rxa_intr_ring_dequeue(rx_adapter);
+	poll_work = rxa_poll(rx_adapter);
 
 	rte_spinlock_unlock(&rx_adapter->rx_lock);
 
-	return 0;
+	return intr_work || poll_work ? 0 : -EAGAIN;
 }
 
-static int
-rte_event_eth_rx_adapter_init(void)
+static void *
+rxa_memzone_array_get(const char *name, unsigned int elt_size, int nb_elems)
 {
-	const char *name = RXA_ADAPTER_ARRAY;
 	const struct rte_memzone *mz;
 	unsigned int sz;
 
-	sz = sizeof(*event_eth_rx_adapter) *
-	    RTE_EVENT_ETH_RX_ADAPTER_MAX_INSTANCE;
+	sz = elt_size * nb_elems;
 	sz = RTE_ALIGN(sz, RTE_CACHE_LINE_SIZE);
 
 	mz = rte_memzone_lookup(name);
@@ -1407,13 +1458,34 @@ rte_event_eth_rx_adapter_init(void)
 		mz = rte_memzone_reserve_aligned(name, sz, rte_socket_id(), 0,
 						 RTE_CACHE_LINE_SIZE);
 		if (mz == NULL) {
-			RTE_EDEV_LOG_ERR("failed to reserve memzone err = %"
-					PRId32, rte_errno);
-			return -rte_errno;
+			RTE_EDEV_LOG_ERR("failed to reserve memzone"
+					 " name = %s, err = %"
+					 PRId32, name, rte_errno);
+			return NULL;
 		}
 	}
 
-	event_eth_rx_adapter = mz->addr;
+	return mz->addr;
+}
+
+static int
+rte_event_eth_rx_adapter_init(void)
+{
+	uint8_t i;
+
+	if (event_eth_rx_adapter == NULL) {
+		event_eth_rx_adapter =
+			rxa_memzone_array_get(RXA_ADAPTER_ARRAY,
+					sizeof(*event_eth_rx_adapter),
+					RTE_EVENT_ETH_RX_ADAPTER_MAX_INSTANCE);
+		if (event_eth_rx_adapter == NULL)
+			return -ENOMEM;
+
+		for (i = 0; i < RTE_EVENT_ETH_RX_ADAPTER_MAX_INSTANCE; i++)
+			event_eth_rx_adapter[i] = NULL;
+
+	}
+
 	return 0;
 }
 
@@ -1426,6 +1498,7 @@ rxa_memzone_lookup(void)
 		mz = rte_memzone_lookup(RXA_ADAPTER_ARRAY);
 		if (mz == NULL)
 			return -ENOMEM;
+
 		event_eth_rx_adapter = mz->addr;
 	}
 
@@ -1927,7 +2000,6 @@ rxa_sw_del(struct event_eth_rx_adapter *rx_adapter,
 	int intrq;
 	int sintrq;
 
-
 	if (rx_adapter->nb_queues == 0)
 		return;
 
@@ -2011,7 +2083,6 @@ rxa_add_queue(struct event_eth_rx_adapter *rx_adapter,
 	qi_ev->event = ev->event;
 	qi_ev->op = RTE_EVENT_OP_NEW;
 	qi_ev->event_type = RTE_EVENT_TYPE_ETH_RX_ADAPTER;
-	qi_ev->sub_event_type = 0;
 
 	if (conf->rx_queue_flags &
 			RTE_EVENT_ETH_RX_ADAPTER_QUEUE_FLOW_ID_VALID) {
@@ -2500,6 +2571,9 @@ rte_event_eth_rx_adapter_free(uint8_t id)
 {
 	struct event_eth_rx_adapter *rx_adapter;
 
+	if (rxa_memzone_lookup())
+		return -ENOMEM;
+
 	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_ERR_RET(id, -EINVAL);
 
 	rx_adapter = rxa_id_to_adapter(id);
@@ -2536,6 +2610,9 @@ rte_event_eth_rx_adapter_queue_add(uint8_t id,
 	struct rte_eventdev *dev;
 	struct eth_device_info *dev_info;
 	struct rte_event_eth_rx_adapter_vector_limits limits;
+
+	if (rxa_memzone_lookup())
+		return -ENOMEM;
 
 	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_ERR_RET(id, -EINVAL);
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(eth_dev_id, -EINVAL);
@@ -2631,8 +2708,8 @@ rte_event_eth_rx_adapter_queue_add(uint8_t id,
 	dev_info = &rx_adapter->eth_devices[eth_dev_id];
 
 	if (cap & RTE_EVENT_ETH_RX_ADAPTER_CAP_INTERNAL_PORT) {
-		RTE_FUNC_PTR_OR_ERR_RET(*dev->dev_ops->eth_rx_adapter_queue_add,
-					-ENOTSUP);
+		if (*dev->dev_ops->eth_rx_adapter_queue_add == NULL)
+			return -ENOTSUP;
 		if (dev_info->rx_queue == NULL) {
 			dev_info->rx_queue =
 			    rte_zmalloc_socket(rx_adapter->mem_name,
@@ -2702,6 +2779,9 @@ rte_event_eth_rx_adapter_queue_del(uint8_t id, uint16_t eth_dev_id,
 	uint32_t *rx_wrr = NULL;
 	int num_intr_vec;
 
+	if (rxa_memzone_lookup())
+		return -ENOMEM;
+
 	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_ERR_RET(id, -EINVAL);
 	RTE_ETH_VALID_PORTID_OR_ERR_RET(eth_dev_id, -EINVAL);
 
@@ -2726,8 +2806,8 @@ rte_event_eth_rx_adapter_queue_del(uint8_t id, uint16_t eth_dev_id,
 	dev_info = &rx_adapter->eth_devices[eth_dev_id];
 
 	if (cap & RTE_EVENT_ETH_RX_ADAPTER_CAP_INTERNAL_PORT) {
-		RTE_FUNC_PTR_OR_ERR_RET(*dev->dev_ops->eth_rx_adapter_queue_del,
-				 -ENOTSUP);
+		if (*dev->dev_ops->eth_rx_adapter_queue_del == NULL)
+			return -ENOTSUP;
 		ret = (*dev->dev_ops->eth_rx_adapter_queue_del)(dev,
 						&rte_eth_devices[eth_dev_id],
 						rx_queue_id);
@@ -2808,6 +2888,7 @@ unlock_ret:
 
 	rte_eventdev_trace_eth_rx_adapter_queue_del(id, eth_dev_id,
 		rx_queue_id, ret);
+
 	return ret;
 }
 
@@ -2837,9 +2918,8 @@ rte_event_eth_rx_adapter_vector_limits_get(
 	}
 
 	if (cap & RTE_EVENT_ETH_RX_ADAPTER_CAP_INTERNAL_PORT) {
-		RTE_FUNC_PTR_OR_ERR_RET(
-			*dev->dev_ops->eth_rx_adapter_vector_limits_get,
-			-ENOTSUP);
+		if (*dev->dev_ops->eth_rx_adapter_vector_limits_get == NULL)
+			return -ENOTSUP;
 		ret = dev->dev_ops->eth_rx_adapter_vector_limits_get(
 			dev, &rte_eth_devices[eth_port_id], limits);
 	} else {
@@ -2984,15 +3064,17 @@ rte_event_eth_rx_adapter_queue_stats_get(uint8_t id,
 		return -EINVAL;
 	}
 
-	queue_info = &dev_info->rx_queue[rx_queue_id];
-	event_buf = queue_info->event_buf;
-	q_stats = queue_info->stats;
+	if (dev_info->internal_event_port == 0) {
+		queue_info = &dev_info->rx_queue[rx_queue_id];
+		event_buf = queue_info->event_buf;
+		q_stats = queue_info->stats;
 
-	stats->rx_event_buf_count = event_buf->count;
-	stats->rx_event_buf_size = event_buf->events_size;
-	stats->rx_packets = q_stats->rx_packets;
-	stats->rx_poll_count = q_stats->rx_poll_count;
-	stats->rx_dropped = q_stats->rx_dropped;
+		stats->rx_event_buf_count = event_buf->count;
+		stats->rx_event_buf_size = event_buf->events_size;
+		stats->rx_packets = q_stats->rx_packets;
+		stats->rx_poll_count = q_stats->rx_poll_count;
+		stats->rx_dropped = q_stats->rx_dropped;
+	}
 
 	dev = &rte_eventdevs[rx_adapter->eventdev_id];
 	if (dev->dev_ops->eth_rx_adapter_queue_stats_get != NULL) {
@@ -3086,8 +3168,10 @@ rte_event_eth_rx_adapter_queue_stats_reset(uint8_t id,
 		return -EINVAL;
 	}
 
-	queue_info = &dev_info->rx_queue[rx_queue_id];
-	rxa_queue_stats_reset(queue_info);
+	if (dev_info->internal_event_port == 0) {
+		queue_info = &dev_info->rx_queue[rx_queue_id];
+		rxa_queue_stats_reset(queue_info);
+	}
 
 	dev = &rte_eventdevs[rx_adapter->eventdev_id];
 	if (dev->dev_ops->eth_rx_adapter_queue_stats_reset != NULL) {
@@ -3115,6 +3199,26 @@ rte_event_eth_rx_adapter_service_id_get(uint8_t id, uint32_t *service_id)
 
 	if (rx_adapter->service_inited)
 		*service_id = rx_adapter->service_id;
+
+	return rx_adapter->service_inited ? 0 : -ESRCH;
+}
+
+int
+rte_event_eth_rx_adapter_event_port_get(uint8_t id, uint8_t *event_port_id)
+{
+	struct event_eth_rx_adapter *rx_adapter;
+
+	if (rxa_memzone_lookup())
+		return -ENOMEM;
+
+	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_ERR_RET(id, -EINVAL);
+
+	rx_adapter = rxa_id_to_adapter(id);
+	if (rx_adapter == NULL || event_port_id == NULL)
+		return -EINVAL;
+
+	if (rx_adapter->service_inited)
+		*event_port_id = rx_adapter->event_port_id;
 
 	return rx_adapter->service_inited ? 0 : -ESRCH;
 }
@@ -3170,11 +3274,11 @@ rte_event_eth_rx_adapter_queue_conf_get(uint8_t id,
 			uint16_t rx_queue_id,
 			struct rte_event_eth_rx_adapter_queue_conf *queue_conf)
 {
+#define TICK2NSEC(_ticks, _freq) (((_ticks) * (1E9)) / (_freq))
 	struct rte_eventdev *dev;
 	struct event_eth_rx_adapter *rx_adapter;
 	struct eth_device_info *dev_info;
 	struct eth_rx_queue_info *queue_info;
-	struct rte_event *qi_ev;
 	int ret;
 
 	if (rxa_memzone_lookup())
@@ -3205,7 +3309,6 @@ rte_event_eth_rx_adapter_queue_conf_get(uint8_t id,
 	}
 
 	queue_info = &dev_info->rx_queue[rx_queue_id];
-	qi_ev = (struct rte_event *)&queue_info->event;
 
 	memset(queue_conf, 0, sizeof(*queue_conf));
 	queue_conf->rx_queue_flags = 0;
@@ -3214,7 +3317,18 @@ rte_event_eth_rx_adapter_queue_conf_get(uint8_t id,
 			RTE_EVENT_ETH_RX_ADAPTER_QUEUE_FLOW_ID_VALID;
 	queue_conf->servicing_weight = queue_info->wt;
 
-	memcpy(&queue_conf->ev, qi_ev, sizeof(*qi_ev));
+	queue_conf->ev.event = queue_info->event;
+
+	queue_conf->vector_sz = queue_info->vector_data.max_vector_count;
+	queue_conf->vector_mp = queue_info->vector_data.vector_pool;
+	/* need to be converted from ticks to ns */
+	queue_conf->vector_timeout_ns = TICK2NSEC(
+		queue_info->vector_data.vector_timeout_ticks, rte_get_timer_hz());
+
+	if (queue_info->event_buf != NULL)
+		queue_conf->event_buf_size = queue_info->event_buf->events_size;
+	else
+		queue_conf->event_buf_size = 0;
 
 	dev = &rte_eventdevs[rx_adapter->eventdev_id];
 	if (dev->dev_ops->eth_rx_adapter_queue_conf_get != NULL) {
@@ -3226,6 +3340,97 @@ rte_event_eth_rx_adapter_queue_conf_get(uint8_t id,
 	}
 
 	return 0;
+}
+
+static int
+rxa_is_queue_added(struct event_eth_rx_adapter *rx_adapter,
+		   uint16_t eth_dev_id,
+		   uint16_t rx_queue_id)
+{
+	struct eth_device_info *dev_info;
+	struct eth_rx_queue_info *queue_info;
+
+	if (!rx_adapter->eth_devices)
+		return 0;
+
+	dev_info = &rx_adapter->eth_devices[eth_dev_id];
+	if (!dev_info || !dev_info->rx_queue)
+		return 0;
+
+	queue_info = &dev_info->rx_queue[rx_queue_id];
+
+	return queue_info && queue_info->queue_enabled;
+}
+
+#define rxa_evdev(rx_adapter) (&rte_eventdevs[(rx_adapter)->eventdev_id])
+
+#define rxa_dev_instance_get(rx_adapter) \
+		rxa_evdev((rx_adapter))->dev_ops->eth_rx_adapter_instance_get
+
+int
+rte_event_eth_rx_adapter_instance_get(uint16_t eth_dev_id,
+				      uint16_t rx_queue_id,
+				      uint8_t *rxa_inst_id)
+{
+	uint8_t id;
+	int ret = -EINVAL;
+	uint32_t caps;
+	struct event_eth_rx_adapter *rx_adapter;
+
+	if (rxa_memzone_lookup())
+		return -ENOMEM;
+
+	if (eth_dev_id >= rte_eth_dev_count_avail()) {
+		RTE_EDEV_LOG_ERR("Invalid ethernet port id %u", eth_dev_id);
+		return -EINVAL;
+	}
+
+	if (rx_queue_id >= rte_eth_devices[eth_dev_id].data->nb_rx_queues) {
+		RTE_EDEV_LOG_ERR("Invalid Rx queue %u", rx_queue_id);
+		return -EINVAL;
+	}
+
+	if (rxa_inst_id == NULL) {
+		RTE_EDEV_LOG_ERR("rxa_inst_id cannot be NULL");
+		return -EINVAL;
+	}
+
+	/* Iterate through all adapter instances */
+	for (id = 0; id < RTE_EVENT_ETH_RX_ADAPTER_MAX_INSTANCE; id++) {
+		rx_adapter = rxa_id_to_adapter(id);
+		if (!rx_adapter)
+			continue;
+
+		if (rxa_is_queue_added(rx_adapter, eth_dev_id, rx_queue_id)) {
+			*rxa_inst_id = rx_adapter->id;
+			ret = 0;
+		}
+
+		/* Rx adapter internally mainatains queue information
+		 * for both internal port and DPDK service port.
+		 * Eventdev PMD callback is called for future proof only and
+		 * overrides the above return value if defined.
+		 */
+		caps = 0;
+		if (!rte_event_eth_rx_adapter_caps_get(rx_adapter->eventdev_id,
+						      eth_dev_id,
+						      &caps)) {
+			if (caps & RTE_EVENT_ETH_RX_ADAPTER_CAP_INTERNAL_PORT) {
+				ret = rxa_dev_instance_get(rx_adapter) ?
+						rxa_dev_instance_get(rx_adapter)
+								(eth_dev_id,
+								 rx_queue_id,
+								 rxa_inst_id)
+							: -EINVAL;
+			}
+		}
+
+		/* return if entry found */
+		if (ret == 0)
+			return ret;
+	}
+
+	return -EINVAL;
 }
 
 #define RXA_ADD_DICT(stats, s) rte_tel_data_add_dict_u64(d, #s, stats.s)
@@ -3276,7 +3481,7 @@ handle_rxa_stats_reset(const char *cmd __rte_unused,
 {
 	uint8_t rx_adapter_id;
 
-	if (params == NULL || strlen(params) == 0 || ~isdigit(*params))
+	if (params == NULL || strlen(params) == 0 || !isdigit(*params))
 		return -1;
 
 	/* Get Rx adapter ID from parameter string */
@@ -3299,7 +3504,7 @@ handle_rxa_get_queue_conf(const char *cmd __rte_unused,
 {
 	uint8_t rx_adapter_id;
 	uint16_t rx_queue_id;
-	int eth_dev_id;
+	int eth_dev_id, ret = -1;
 	char *token, *l_params;
 	struct rte_event_eth_rx_adapter_queue_conf queue_conf;
 
@@ -3308,33 +3513,37 @@ handle_rxa_get_queue_conf(const char *cmd __rte_unused,
 
 	/* Get Rx adapter ID from parameter string */
 	l_params = strdup(params);
+	if (l_params == NULL)
+		return -ENOMEM;
 	token = strtok(l_params, ",");
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 	rx_adapter_id = strtoul(token, NULL, 10);
-	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_ERR_RET(rx_adapter_id, -EINVAL);
+	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_GOTO_ERR_RET(rx_adapter_id, -EINVAL);
 
 	token = strtok(NULL, ",");
-	if (token == NULL || strlen(token) == 0 || !isdigit(*token))
-		return -1;
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 
 	/* Get device ID from parameter string */
 	eth_dev_id = strtoul(token, NULL, 10);
-	RTE_EVENTDEV_VALID_DEVID_OR_ERR_RET(eth_dev_id, -EINVAL);
+	RTE_ETH_VALID_PORTID_OR_GOTO_ERR_RET(eth_dev_id, -EINVAL);
 
 	token = strtok(NULL, ",");
-	if (token == NULL || strlen(token) == 0 || !isdigit(*token))
-		return -1;
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 
 	/* Get Rx queue ID from parameter string */
 	rx_queue_id = strtoul(token, NULL, 10);
 	if (rx_queue_id >= rte_eth_devices[eth_dev_id].data->nb_rx_queues) {
 		RTE_EDEV_LOG_ERR("Invalid rx queue_id %u", rx_queue_id);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto error;
 	}
 
 	token = strtok(NULL, "\0");
 	if (token != NULL)
 		RTE_EDEV_LOG_ERR("Extra parameters passed to eventdev"
-				 " telemetry command, igrnoring");
+				 " telemetry command, ignoring");
+	/* Parsing parameter finished */
+	free(l_params);
 
 	if (rte_event_eth_rx_adapter_queue_conf_get(rx_adapter_id, eth_dev_id,
 						    rx_queue_id, &queue_conf)) {
@@ -3354,6 +3563,10 @@ handle_rxa_get_queue_conf(const char *cmd __rte_unused,
 	RXA_ADD_DICT(queue_conf.ev, flow_id);
 
 	return 0;
+
+error:
+	free(l_params);
+	return ret;
 }
 
 static int
@@ -3363,7 +3576,7 @@ handle_rxa_get_queue_stats(const char *cmd __rte_unused,
 {
 	uint8_t rx_adapter_id;
 	uint16_t rx_queue_id;
-	int eth_dev_id;
+	int eth_dev_id, ret = -1;
 	char *token, *l_params;
 	struct rte_event_eth_rx_adapter_queue_stats q_stats;
 
@@ -3372,33 +3585,37 @@ handle_rxa_get_queue_stats(const char *cmd __rte_unused,
 
 	/* Get Rx adapter ID from parameter string */
 	l_params = strdup(params);
+	if (l_params == NULL)
+		return -ENOMEM;
 	token = strtok(l_params, ",");
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 	rx_adapter_id = strtoul(token, NULL, 10);
-	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_ERR_RET(rx_adapter_id, -EINVAL);
+	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_GOTO_ERR_RET(rx_adapter_id, -EINVAL);
 
 	token = strtok(NULL, ",");
-	if (token == NULL || strlen(token) == 0 || !isdigit(*token))
-		return -1;
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 
 	/* Get device ID from parameter string */
 	eth_dev_id = strtoul(token, NULL, 10);
-	RTE_EVENTDEV_VALID_DEVID_OR_ERR_RET(eth_dev_id, -EINVAL);
+	RTE_ETH_VALID_PORTID_OR_GOTO_ERR_RET(eth_dev_id, -EINVAL);
 
 	token = strtok(NULL, ",");
-	if (token == NULL || strlen(token) == 0 || !isdigit(*token))
-		return -1;
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 
 	/* Get Rx queue ID from parameter string */
 	rx_queue_id = strtoul(token, NULL, 10);
 	if (rx_queue_id >= rte_eth_devices[eth_dev_id].data->nb_rx_queues) {
 		RTE_EDEV_LOG_ERR("Invalid rx queue_id %u", rx_queue_id);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto error;
 	}
 
 	token = strtok(NULL, "\0");
 	if (token != NULL)
 		RTE_EDEV_LOG_ERR("Extra parameters passed to eventdev"
-				 " telemetry command, igrnoring");
+				 " telemetry command, ignoring");
+	/* Parsing parameter finished */
+	free(l_params);
 
 	if (rte_event_eth_rx_adapter_queue_stats_get(rx_adapter_id, eth_dev_id,
 						    rx_queue_id, &q_stats)) {
@@ -3417,6 +3634,10 @@ handle_rxa_get_queue_stats(const char *cmd __rte_unused,
 	RXA_ADD_DICT(q_stats, rx_dropped);
 
 	return 0;
+
+error:
+	free(l_params);
+	return ret;
 }
 
 static int
@@ -3426,7 +3647,7 @@ handle_rxa_queue_stats_reset(const char *cmd __rte_unused,
 {
 	uint8_t rx_adapter_id;
 	uint16_t rx_queue_id;
-	int eth_dev_id;
+	int eth_dev_id, ret = -1;
 	char *token, *l_params;
 
 	if (params == NULL || strlen(params) == 0 || !isdigit(*params))
@@ -3434,33 +3655,37 @@ handle_rxa_queue_stats_reset(const char *cmd __rte_unused,
 
 	/* Get Rx adapter ID from parameter string */
 	l_params = strdup(params);
+	if (l_params == NULL)
+		return -ENOMEM;
 	token = strtok(l_params, ",");
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 	rx_adapter_id = strtoul(token, NULL, 10);
-	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_ERR_RET(rx_adapter_id, -EINVAL);
+	RTE_EVENT_ETH_RX_ADAPTER_ID_VALID_OR_GOTO_ERR_RET(rx_adapter_id, -EINVAL);
 
 	token = strtok(NULL, ",");
-	if (token == NULL || strlen(token) == 0 || !isdigit(*token))
-		return -1;
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 
 	/* Get device ID from parameter string */
 	eth_dev_id = strtoul(token, NULL, 10);
-	RTE_EVENTDEV_VALID_DEVID_OR_ERR_RET(eth_dev_id, -EINVAL);
+	RTE_ETH_VALID_PORTID_OR_GOTO_ERR_RET(eth_dev_id, -EINVAL);
 
 	token = strtok(NULL, ",");
-	if (token == NULL || strlen(token) == 0 || !isdigit(*token))
-		return -1;
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
 
 	/* Get Rx queue ID from parameter string */
 	rx_queue_id = strtoul(token, NULL, 10);
 	if (rx_queue_id >= rte_eth_devices[eth_dev_id].data->nb_rx_queues) {
 		RTE_EDEV_LOG_ERR("Invalid rx queue_id %u", rx_queue_id);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto error;
 	}
 
 	token = strtok(NULL, "\0");
 	if (token != NULL)
 		RTE_EDEV_LOG_ERR("Extra parameters passed to eventdev"
-				 " telemetry command, igrnoring");
+				 " telemetry command, ignoring");
+	/* Parsing parameter finished */
+	free(l_params);
 
 	if (rte_event_eth_rx_adapter_queue_stats_reset(rx_adapter_id,
 						       eth_dev_id,
@@ -3470,6 +3695,72 @@ handle_rxa_queue_stats_reset(const char *cmd __rte_unused,
 	}
 
 	return 0;
+
+error:
+	free(l_params);
+	return ret;
+}
+
+static int
+handle_rxa_instance_get(const char *cmd __rte_unused,
+			const char *params,
+			struct rte_tel_data *d)
+{
+	uint8_t instance_id;
+	uint16_t rx_queue_id;
+	int eth_dev_id, ret = -1;
+	char *token, *l_params;
+
+	if (params == NULL || strlen(params) == 0 || !isdigit(*params))
+		return -1;
+
+	l_params = strdup(params);
+	if (l_params == NULL)
+		return -ENOMEM;
+	token = strtok(l_params, ",");
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
+
+	/* Get device ID from parameter string */
+	eth_dev_id = strtoul(token, NULL, 10);
+	RTE_ETH_VALID_PORTID_OR_GOTO_ERR_RET(eth_dev_id, -EINVAL);
+
+	token = strtok(NULL, ",");
+	RTE_EVENT_ETH_RX_ADAPTER_TOKEN_VALID_OR_GOTO_ERR_RET(token, -1);
+
+	/* Get Rx queue ID from parameter string */
+	rx_queue_id = strtoul(token, NULL, 10);
+	if (rx_queue_id >= rte_eth_devices[eth_dev_id].data->nb_rx_queues) {
+		RTE_EDEV_LOG_ERR("Invalid rx queue_id %u", rx_queue_id);
+		ret = -EINVAL;
+		goto error;
+	}
+
+	token = strtok(NULL, "\0");
+	if (token != NULL)
+		RTE_EDEV_LOG_ERR("Extra parameters passed to eventdev"
+				 " telemetry command, ignoring");
+
+	/* Parsing parameter finished */
+	free(l_params);
+
+	if (rte_event_eth_rx_adapter_instance_get(eth_dev_id,
+						  rx_queue_id,
+						  &instance_id)) {
+		RTE_EDEV_LOG_ERR("Failed to get RX adapter instance ID "
+				 " for rx_queue_id = %d", rx_queue_id);
+		return -1;
+	}
+
+	rte_tel_data_start_dict(d);
+	rte_tel_data_add_dict_u64(d, "eth_dev_id", eth_dev_id);
+	rte_tel_data_add_dict_u64(d, "rx_queue_id", rx_queue_id);
+	rte_tel_data_add_dict_u64(d, "rxa_instance_id", instance_id);
+
+	return 0;
+
+error:
+	free(l_params);
+	return ret;
 }
 
 RTE_INIT(rxa_init_telemetry)
@@ -3493,4 +3784,8 @@ RTE_INIT(rxa_init_telemetry)
 	rte_telemetry_register_cmd("/eventdev/rxa_queue_stats_reset",
 		handle_rxa_queue_stats_reset,
 		"Reset Rx queue stats. Parameter: rxa_id, dev_id, queue_id");
+
+	rte_telemetry_register_cmd("/eventdev/rxa_rxq_instance_get",
+		handle_rxa_instance_get,
+		"Returns Rx adapter instance id. Parameter: dev_id, queue_id");
 }

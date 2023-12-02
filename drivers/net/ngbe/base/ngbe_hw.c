@@ -20,8 +20,6 @@ s32 ngbe_start_hw(struct ngbe_hw *hw)
 {
 	s32 err;
 
-	DEBUGFUNC("ngbe_start_hw");
-
 	/* Clear the VLAN filter table */
 	hw->mac.clear_vfta(hw);
 
@@ -31,7 +29,7 @@ s32 ngbe_start_hw(struct ngbe_hw *hw)
 	/* Setup flow control */
 	err = hw->mac.setup_fc(hw);
 	if (err != 0 && err != NGBE_NOT_IMPLEMENTED) {
-		DEBUGOUT("Flow control setup failed, returning %d\n", err);
+		DEBUGOUT("Flow control setup failed, returning %d", err);
 		return err;
 	}
 
@@ -55,8 +53,7 @@ s32 ngbe_init_hw(struct ngbe_hw *hw)
 {
 	s32 status;
 
-	DEBUGFUNC("ngbe_init_hw");
-
+	ngbe_read_efuse(hw);
 	ngbe_save_eeprom_version(hw);
 
 	/* Reset the hardware */
@@ -67,7 +64,7 @@ s32 ngbe_init_hw(struct ngbe_hw *hw)
 	}
 
 	if (status != 0)
-		DEBUGOUT("Failed to initialize HW, STATUS = %d\n", status);
+		DEBUGOUT("Failed to initialize HW, STATUS = %d", status);
 
 	return status;
 }
@@ -124,8 +121,7 @@ ngbe_reset_misc_em(struct ngbe_hw *hw)
 
 	wr32m(hw, NGBE_GPIE, NGBE_GPIE_MSIX, NGBE_GPIE_MSIX);
 
-	if ((hw->sub_system_id & NGBE_OEM_MASK) == NGBE_LY_M88E1512_SFP ||
-		(hw->sub_system_id & NGBE_OEM_MASK) == NGBE_LY_YT8521S_SFP) {
+	if (hw->gpio_ctl) {
 		/* gpio0 is used to power on/off control*/
 		wr32(hw, NGBE_GPIODIR, NGBE_GPIODIR_DDR(1));
 		wr32(hw, NGBE_GPIODATA, NGBE_GPIOBIT_0);
@@ -155,8 +151,6 @@ ngbe_reset_misc_em(struct ngbe_hw *hw)
 s32 ngbe_reset_hw_em(struct ngbe_hw *hw)
 {
 	s32 status;
-
-	DEBUGFUNC("ngbe_reset_hw_em");
 
 	/* Call adapter stop to disable tx/rx and clear interrupts */
 	status = hw->mac.stop_hw(hw);
@@ -204,8 +198,6 @@ s32 ngbe_reset_hw_em(struct ngbe_hw *hw)
 s32 ngbe_clear_hw_cntrs(struct ngbe_hw *hw)
 {
 	u16 i = 0;
-
-	DEBUGFUNC("ngbe_clear_hw_cntrs");
 
 	/* QP Stats */
 	/* don't write clear queue stats */
@@ -305,8 +297,6 @@ s32 ngbe_get_mac_addr(struct ngbe_hw *hw, u8 *mac_addr)
 	u32 rar_low;
 	u16 i;
 
-	DEBUGFUNC("ngbe_get_mac_addr");
-
 	wr32(hw, NGBE_ETHADDRIDX, 0);
 	rar_high = rd32(hw, NGBE_ETHADDRH);
 	rar_low = rd32(hw, NGBE_ETHADDRL);
@@ -332,8 +322,6 @@ void ngbe_set_lan_id_multi_port(struct ngbe_hw *hw)
 	struct ngbe_bus_info *bus = &hw->bus;
 	u32 reg = 0;
 
-	DEBUGFUNC("ngbe_set_lan_id_multi_port");
-
 	reg = rd32(hw, NGBE_PORTSTAT);
 	bus->lan_id = NGBE_PORTSTAT_ID(reg);
 	bus->func = bus->lan_id;
@@ -350,10 +338,8 @@ void ngbe_set_lan_id_multi_port(struct ngbe_hw *hw)
  **/
 s32 ngbe_stop_hw(struct ngbe_hw *hw)
 {
-	u32 reg_val;
 	u16 i;
-
-	DEBUGFUNC("ngbe_stop_hw");
+	s32 status = 0;
 
 	/*
 	 * Set the adapter_stopped flag so other driver functions stop touching
@@ -372,16 +358,27 @@ s32 ngbe_stop_hw(struct ngbe_hw *hw)
 	wr32(hw, NGBE_ICRMISC, NGBE_ICRMISC_MASK);
 	wr32(hw, NGBE_ICR(0), NGBE_ICR_MASK);
 
-	/* Disable the transmit unit.  Each queue must be disabled. */
-	for (i = 0; i < hw->mac.max_tx_queues; i++)
-		wr32(hw, NGBE_TXCFG(i), NGBE_TXCFG_FLUSH);
+	wr32(hw, NGBE_BMECTL, 0x3);
 
 	/* Disable the receive unit by stopping each queue */
-	for (i = 0; i < hw->mac.max_rx_queues; i++) {
-		reg_val = rd32(hw, NGBE_RXCFG(i));
-		reg_val &= ~NGBE_RXCFG_ENA;
-		wr32(hw, NGBE_RXCFG(i), reg_val);
-	}
+	for (i = 0; i < hw->mac.max_rx_queues; i++)
+		wr32(hw, NGBE_RXCFG(i), 0);
+
+	/* flush all queues disables */
+	ngbe_flush(hw);
+	msec_delay(2);
+
+	/*
+	 * Prevent the PCI-E bus from hanging by disabling PCI-E master
+	 * access and verify no pending requests
+	 */
+	status = ngbe_set_pcie_master(hw, false);
+	if (status)
+		return status;
+
+	/* Disable the transmit unit.  Each queue must be disabled. */
+	for (i = 0; i < hw->mac.max_tx_queues; i++)
+		wr32(hw, NGBE_TXCFG(i), 0);
 
 	/* flush all queues disables */
 	ngbe_flush(hw);
@@ -398,8 +395,6 @@ s32 ngbe_stop_hw(struct ngbe_hw *hw)
 s32 ngbe_led_on(struct ngbe_hw *hw, u32 index)
 {
 	u32 led_reg = rd32(hw, NGBE_LEDCTL);
-
-	DEBUGFUNC("ngbe_led_on");
 
 	if (index > 3)
 		return NGBE_ERR_PARAM;
@@ -421,8 +416,6 @@ s32 ngbe_led_off(struct ngbe_hw *hw, u32 index)
 {
 	u32 led_reg = rd32(hw, NGBE_LEDCTL);
 
-	DEBUGFUNC("ngbe_led_off");
-
 	if (index > 3)
 		return NGBE_ERR_PARAM;
 
@@ -443,8 +436,6 @@ s32 ngbe_led_off(struct ngbe_hw *hw, u32 index)
 s32 ngbe_validate_mac_addr(u8 *mac_addr)
 {
 	s32 status = 0;
-
-	DEBUGFUNC("ngbe_validate_mac_addr");
 
 	/* Make sure it is not a multicast address */
 	if (NGBE_IS_MULTICAST((struct rte_ether_addr *)mac_addr)) {
@@ -476,11 +467,9 @@ s32 ngbe_set_rar(struct ngbe_hw *hw, u32 index, u8 *addr, u32 vmdq,
 	u32 rar_low, rar_high;
 	u32 rar_entries = hw->mac.num_rar_entries;
 
-	DEBUGFUNC("ngbe_set_rar");
-
 	/* Make sure we are using a valid rar index range */
 	if (index >= rar_entries) {
-		DEBUGOUT("RAR index %d is out of range.\n", index);
+		DEBUGOUT("RAR index %d is out of range.", index);
 		return NGBE_ERR_INVALID_ARGUMENT;
 	}
 
@@ -528,11 +517,9 @@ s32 ngbe_clear_rar(struct ngbe_hw *hw, u32 index)
 	u32 rar_high;
 	u32 rar_entries = hw->mac.num_rar_entries;
 
-	DEBUGFUNC("ngbe_clear_rar");
-
 	/* Make sure we are using a valid rar index range */
 	if (index >= rar_entries) {
-		DEBUGOUT("RAR index %d is out of range.\n", index);
+		DEBUGOUT("RAR index %d is out of range.", index);
 		return NGBE_ERR_INVALID_ARGUMENT;
 	}
 
@@ -568,8 +555,6 @@ s32 ngbe_init_rx_addrs(struct ngbe_hw *hw)
 	u32 psrctl;
 	u32 rar_entries = hw->mac.num_rar_entries;
 
-	DEBUGFUNC("ngbe_init_rx_addrs");
-
 	/*
 	 * If the current mac address is valid, assume it is a software override
 	 * to the permanent address.
@@ -580,18 +565,18 @@ s32 ngbe_init_rx_addrs(struct ngbe_hw *hw)
 		/* Get the MAC address from the RAR0 for later reference */
 		hw->mac.get_mac_addr(hw, hw->mac.addr);
 
-		DEBUGOUT(" Keeping Current RAR0 Addr =%.2X %.2X %.2X ",
+		DEBUGOUT(" Keeping Current RAR0 Addr = "
+			  RTE_ETHER_ADDR_PRT_FMT,
 			  hw->mac.addr[0], hw->mac.addr[1],
-			  hw->mac.addr[2]);
-		DEBUGOUT("%.2X %.2X %.2X\n", hw->mac.addr[3],
+			  hw->mac.addr[2], hw->mac.addr[3],
 			  hw->mac.addr[4], hw->mac.addr[5]);
 	} else {
 		/* Setup the receive address. */
-		DEBUGOUT("Overriding MAC Address in RAR[0]\n");
-		DEBUGOUT(" New MAC Addr =%.2X %.2X %.2X ",
+		DEBUGOUT("Overriding MAC Address in RAR[0]");
+		DEBUGOUT(" New MAC Addr = "
+			  RTE_ETHER_ADDR_PRT_FMT,
 			  hw->mac.addr[0], hw->mac.addr[1],
-			  hw->mac.addr[2]);
-		DEBUGOUT("%.2X %.2X %.2X\n", hw->mac.addr[3],
+			  hw->mac.addr[2], hw->mac.addr[3],
 			  hw->mac.addr[4], hw->mac.addr[5]);
 
 		hw->mac.set_rar(hw, 0, hw->mac.addr, 0, true);
@@ -601,7 +586,7 @@ s32 ngbe_init_rx_addrs(struct ngbe_hw *hw)
 	hw->mac.clear_vmdq(hw, 0, BIT_MASK32);
 
 	/* Zero out the other receive addresses. */
-	DEBUGOUT("Clearing RAR[1-%d]\n", rar_entries - 1);
+	DEBUGOUT("Clearing RAR[1-%d]", rar_entries - 1);
 	for (i = 1; i < rar_entries; i++) {
 		wr32(hw, NGBE_ETHADDRIDX, i);
 		wr32(hw, NGBE_ETHADDRL, 0);
@@ -615,7 +600,7 @@ s32 ngbe_init_rx_addrs(struct ngbe_hw *hw)
 	psrctl |= NGBE_PSRCTL_ADHF12(hw->mac.mc_filter_type);
 	wr32(hw, NGBE_PSRCTL, psrctl);
 
-	DEBUGOUT(" Clearing MTA\n");
+	DEBUGOUT(" Clearing MTA");
 	for (i = 0; i < hw->mac.mcft_size; i++)
 		wr32(hw, NGBE_MCADDRTBL(i), 0);
 
@@ -640,8 +625,6 @@ static s32 ngbe_mta_vector(struct ngbe_hw *hw, u8 *mc_addr)
 {
 	u32 vector = 0;
 
-	DEBUGFUNC("ngbe_mta_vector");
-
 	switch (hw->mac.mc_filter_type) {
 	case 0:   /* use bits [47:36] of the address */
 		vector = ((mc_addr[4] >> 4) | (((u16)mc_addr[5]) << 4));
@@ -656,7 +639,7 @@ static s32 ngbe_mta_vector(struct ngbe_hw *hw, u8 *mc_addr)
 		vector = ((mc_addr[4]) | (((u16)mc_addr[5]) << 8));
 		break;
 	default:  /* Invalid mc_filter_type */
-		DEBUGOUT("MC filter type param set incorrectly\n");
+		DEBUGOUT("MC filter type param set incorrectly");
 		ASSERT(0);
 		break;
 	}
@@ -679,12 +662,10 @@ void ngbe_set_mta(struct ngbe_hw *hw, u8 *mc_addr)
 	u32 vector_bit;
 	u32 vector_reg;
 
-	DEBUGFUNC("ngbe_set_mta");
-
 	hw->addr_ctrl.mta_in_use++;
 
 	vector = ngbe_mta_vector(hw, mc_addr);
-	DEBUGOUT(" bit-vector = 0x%03X\n", vector);
+	DEBUGOUT(" bit-vector = 0x%03X", vector);
 
 	/*
 	 * The MTA is a register array of 128 32-bit registers. It is treated
@@ -718,8 +699,6 @@ s32 ngbe_update_mc_addr_list(struct ngbe_hw *hw, u8 *mc_addr_list,
 	u32 i;
 	u32 vmdq;
 
-	DEBUGFUNC("ngbe_update_mc_addr_list");
-
 	/*
 	 * Set the new number of MC addresses that we are being requested to
 	 * use.
@@ -729,13 +708,13 @@ s32 ngbe_update_mc_addr_list(struct ngbe_hw *hw, u8 *mc_addr_list,
 
 	/* Clear mta_shadow */
 	if (clear) {
-		DEBUGOUT(" Clearing MTA\n");
+		DEBUGOUT(" Clearing MTA");
 		memset(&hw->mac.mta_shadow, 0, sizeof(hw->mac.mta_shadow));
 	}
 
 	/* Update mta_shadow */
 	for (i = 0; i < mc_addr_count; i++) {
-		DEBUGOUT(" Adding the multicast addresses:\n");
+		DEBUGOUT(" Adding the multicast addresses:");
 		ngbe_set_mta(hw, next(hw, &mc_addr_list, &vmdq));
 	}
 
@@ -752,7 +731,7 @@ s32 ngbe_update_mc_addr_list(struct ngbe_hw *hw, u8 *mc_addr_list,
 		wr32(hw, NGBE_PSRCTL, psrctl);
 	}
 
-	DEBUGOUT("ngbe update mc addr list complete\n");
+	DEBUGOUT("ngbe update mc addr list complete");
 	return 0;
 }
 
@@ -767,11 +746,9 @@ s32 ngbe_setup_fc_em(struct ngbe_hw *hw)
 	s32 err = 0;
 	u16 reg_cu = 0;
 
-	DEBUGFUNC("ngbe_setup_fc");
-
 	/* Validate the requested mode */
 	if (hw->fc.strict_ieee && hw->fc.requested_mode == ngbe_fc_rx_pause) {
-		DEBUGOUT("ngbe_fc_rx_pause not valid in strict IEEE mode\n");
+		DEBUGOUT("ngbe_fc_rx_pause not valid in strict IEEE mode");
 		err = NGBE_ERR_INVALID_LINK_SETTINGS;
 		goto out;
 	}
@@ -827,7 +804,7 @@ s32 ngbe_setup_fc_em(struct ngbe_hw *hw)
 			reg_cu |= 0xC00; /*need to merge rtl and mvl on page 0*/
 		break;
 	default:
-		DEBUGOUT("Flow control param set incorrectly\n");
+		DEBUGOUT("Flow control param set incorrectly");
 		err = NGBE_ERR_CONFIG;
 		goto out;
 	}
@@ -851,8 +828,6 @@ s32 ngbe_fc_enable(struct ngbe_hw *hw)
 	u32 pause_time;
 	u32 fcrtl, fcrth;
 
-	DEBUGFUNC("ngbe_fc_enable");
-
 	/* Validate the water mark configuration */
 	if (!hw->fc.pause_time) {
 		err = NGBE_ERR_INVALID_LINK_SETTINGS;
@@ -863,7 +838,7 @@ s32 ngbe_fc_enable(struct ngbe_hw *hw)
 	if ((hw->fc.current_mode & ngbe_fc_tx_pause) && hw->fc.high_water) {
 		if (!hw->fc.low_water ||
 			hw->fc.low_water >= hw->fc.high_water) {
-			DEBUGOUT("Invalid water mark configuration\n");
+			DEBUGOUT("Invalid water mark configuration");
 			err = NGBE_ERR_INVALID_LINK_SETTINGS;
 			goto out;
 		}
@@ -919,7 +894,7 @@ s32 ngbe_fc_enable(struct ngbe_hw *hw)
 		fccfg_reg |= NGBE_TXFCCFG_FC;
 		break;
 	default:
-		DEBUGOUT("Flow control param set incorrectly\n");
+		DEBUGOUT("Flow control param set incorrectly");
 		err = NGBE_ERR_CONFIG;
 		goto out;
 	}
@@ -977,8 +952,7 @@ s32 ngbe_negotiate_fc(struct ngbe_hw *hw, u32 adv_reg, u32 lp_reg,
 		       u32 adv_sym, u32 adv_asm, u32 lp_sym, u32 lp_asm)
 {
 	if ((!(adv_reg)) ||  (!(lp_reg))) {
-		DEBUGOUT("Local or link partner's advertised flow control "
-			 "settings are NULL. Local: %x, link partner: %x\n",
+		DEBUGOUT("Local or link partner's advertised flow control settings are NULL. Local: %x, link partner: %x",
 			      adv_reg, lp_reg);
 		return NGBE_ERR_FC_NOT_NEGOTIATED;
 	}
@@ -993,22 +967,22 @@ s32 ngbe_negotiate_fc(struct ngbe_hw *hw, u32 adv_reg, u32 lp_reg,
 		 */
 		if (hw->fc.requested_mode == ngbe_fc_full) {
 			hw->fc.current_mode = ngbe_fc_full;
-			DEBUGOUT("Flow Control = FULL.\n");
+			DEBUGOUT("Flow Control = FULL.");
 		} else {
 			hw->fc.current_mode = ngbe_fc_rx_pause;
-			DEBUGOUT("Flow Control=RX PAUSE frames only\n");
+			DEBUGOUT("Flow Control=RX PAUSE frames only");
 		}
 	} else if (!(adv_reg & adv_sym) && (adv_reg & adv_asm) &&
 		   (lp_reg & lp_sym) && (lp_reg & lp_asm)) {
 		hw->fc.current_mode = ngbe_fc_tx_pause;
-		DEBUGOUT("Flow Control = TX PAUSE frames only.\n");
+		DEBUGOUT("Flow Control = TX PAUSE frames only.");
 	} else if ((adv_reg & adv_sym) && (adv_reg & adv_asm) &&
 		   !(lp_reg & lp_sym) && (lp_reg & lp_asm)) {
 		hw->fc.current_mode = ngbe_fc_rx_pause;
-		DEBUGOUT("Flow Control = RX PAUSE frames only.\n");
+		DEBUGOUT("Flow Control = RX PAUSE frames only.");
 	} else {
 		hw->fc.current_mode = ngbe_fc_none;
-		DEBUGOUT("Flow Control = NONE.\n");
+		DEBUGOUT("Flow Control = NONE.");
 	}
 	return 0;
 }
@@ -1046,8 +1020,6 @@ void ngbe_fc_autoneg(struct ngbe_hw *hw)
 	u32 speed;
 	bool link_up;
 
-	DEBUGFUNC("ngbe_fc_autoneg");
-
 	/*
 	 * AN should have completed when the cable was plugged in.
 	 * Look for reasons to bail out.  Bail out if:
@@ -1077,6 +1049,64 @@ out:
 }
 
 /**
+ *  ngbe_set_pcie_master - Disable or Enable PCI-express master access
+ *  @hw: pointer to hardware structure
+ *
+ *  Disables PCI-Express master access and verifies there are no pending
+ *  requests. NGBE_ERR_MASTER_REQUESTS_PENDING is returned if master disable
+ *  bit hasn't caused the master requests to be disabled, else 0
+ *  is returned signifying master requests disabled.
+ **/
+s32 ngbe_set_pcie_master(struct ngbe_hw *hw, bool enable)
+{
+	struct rte_pci_device *pci_dev = (struct rte_pci_device *)hw->back;
+	s32 status = 0;
+	s32 ret = 0;
+	u32 i;
+	u16 reg;
+
+	ret = rte_pci_read_config(pci_dev, &reg,
+			sizeof(reg), PCI_COMMAND);
+	if (ret != sizeof(reg)) {
+		DEBUGOUT("Cannot read command from PCI config space!\n");
+		return -1;
+	}
+
+	if (enable)
+		reg |= PCI_COMMAND_MASTER;
+	else
+		reg &= ~PCI_COMMAND_MASTER;
+
+	ret = rte_pci_write_config(pci_dev, &reg,
+			sizeof(reg), PCI_COMMAND);
+	if (ret != sizeof(reg)) {
+		DEBUGOUT("Cannot write command to PCI config space!\n");
+		return -1;
+	}
+
+	if (enable)
+		goto out;
+
+	/* Exit if master requests are blocked */
+	if (!(rd32(hw, NGBE_BMEPEND)) ||
+	    NGBE_REMOVED(hw->hw_addr))
+		goto out;
+
+	/* Poll for master request bit to clear */
+	for (i = 0; i < NGBE_PCI_MASTER_DISABLE_TIMEOUT; i++) {
+		usec_delay(100);
+		if (!(rd32(hw, NGBE_BMEPEND)))
+			goto out;
+	}
+
+	DEBUGOUT("PCIe transaction pending bit also did not clear.");
+	status = NGBE_ERR_MASTER_REQUESTS_PENDING;
+
+out:
+	return status;
+}
+
+/**
  *  ngbe_acquire_swfw_sync - Acquire SWFW semaphore
  *  @hw: pointer to hardware structure
  *  @mask: Mask to specify which semaphore to acquire
@@ -1087,12 +1117,11 @@ out:
 s32 ngbe_acquire_swfw_sync(struct ngbe_hw *hw, u32 mask)
 {
 	u32 mngsem = 0;
+	u32 fwsm = 0;
 	u32 swmask = NGBE_MNGSEM_SW(mask);
 	u32 fwmask = NGBE_MNGSEM_FW(mask);
 	u32 timeout = 200;
 	u32 i;
-
-	DEBUGFUNC("ngbe_acquire_swfw_sync");
 
 	for (i = 0; i < timeout; i++) {
 		/*
@@ -1115,9 +1144,9 @@ s32 ngbe_acquire_swfw_sync(struct ngbe_hw *hw, u32 mask)
 		}
 	}
 
-	/* If time expired clear the bits holding the lock and retry */
-	if (mngsem & (fwmask | swmask))
-		ngbe_release_swfw_sync(hw, mngsem & (fwmask | swmask));
+	fwsm = rd32(hw, NGBE_MNGFWSYNC);
+	DEBUGOUT("SWFW semaphore not granted: MNG_SWFW_SYNC = 0x%x, MNG_FW_SM = 0x%x",
+			mngsem, fwsm);
 
 	msec_delay(5);
 	return NGBE_ERR_SWFW_SYNC;
@@ -1135,8 +1164,6 @@ void ngbe_release_swfw_sync(struct ngbe_hw *hw, u32 mask)
 {
 	u32 mngsem;
 	u32 swmask = mask;
-
-	DEBUGFUNC("ngbe_release_swfw_sync");
 
 	ngbe_get_eeprom_semaphore(hw);
 
@@ -1161,9 +1188,6 @@ s32 ngbe_disable_sec_rx_path(struct ngbe_hw *hw)
 	int i;
 	u32 secrxreg;
 
-	DEBUGFUNC("ngbe_disable_sec_rx_path");
-
-
 	secrxreg = rd32(hw, NGBE_SECRXCTL);
 	secrxreg |= NGBE_SECRXCTL_XDSA;
 	wr32(hw, NGBE_SECRXCTL, secrxreg);
@@ -1178,8 +1202,7 @@ s32 ngbe_disable_sec_rx_path(struct ngbe_hw *hw)
 
 	/* For informational purposes only */
 	if (i >= NGBE_MAX_SECRX_POLL)
-		DEBUGOUT("Rx unit being enabled before security "
-			 "path fully disabled.  Continuing with init.\n");
+		DEBUGOUT("Rx unit being enabled before security path fully disabled.  Continuing with init.");
 
 	return 0;
 }
@@ -1193,8 +1216,6 @@ s32 ngbe_disable_sec_rx_path(struct ngbe_hw *hw)
 s32 ngbe_enable_sec_rx_path(struct ngbe_hw *hw)
 {
 	u32 secrxreg;
-
-	DEBUGFUNC("ngbe_enable_sec_rx_path");
 
 	secrxreg = rd32(hw, NGBE_SECRXCTL);
 	secrxreg &= ~NGBE_SECRXCTL_XDSA;
@@ -1215,11 +1236,9 @@ s32 ngbe_clear_vmdq(struct ngbe_hw *hw, u32 rar, u32 vmdq)
 	u32 mpsar;
 	u32 rar_entries = hw->mac.num_rar_entries;
 
-	DEBUGFUNC("ngbe_clear_vmdq");
-
 	/* Make sure we are using a valid rar index range */
 	if (rar >= rar_entries) {
-		DEBUGOUT("RAR index %d is out of range.\n", rar);
+		DEBUGOUT("RAR index %d is out of range.", rar);
 		return NGBE_ERR_INVALID_ARGUMENT;
 	}
 
@@ -1253,11 +1272,9 @@ s32 ngbe_set_vmdq(struct ngbe_hw *hw, u32 rar, u32 vmdq)
 	u32 mpsar;
 	u32 rar_entries = hw->mac.num_rar_entries;
 
-	DEBUGFUNC("ngbe_set_vmdq");
-
 	/* Make sure we are using a valid rar index range */
 	if (rar >= rar_entries) {
-		DEBUGOUT("RAR index %d is out of range.\n", rar);
+		DEBUGOUT("RAR index %d is out of range.", rar);
 		return NGBE_ERR_INVALID_ARGUMENT;
 	}
 
@@ -1278,8 +1295,7 @@ s32 ngbe_init_uta_tables(struct ngbe_hw *hw)
 {
 	int i;
 
-	DEBUGFUNC("ngbe_init_uta_tables");
-	DEBUGOUT(" Clearing UTA\n");
+	DEBUGOUT(" Clearing UTA");
 
 	for (i = 0; i < 128; i++)
 		wr32(hw, NGBE_UCADDRTBL(i), 0);
@@ -1334,7 +1350,7 @@ s32 ngbe_find_vlvf_slot(struct ngbe_hw *hw, u32 vlan, bool vlvf_bypass)
 	 * slot we found during our search, else error.
 	 */
 	if (!first_empty_slot)
-		DEBUGOUT("No space in VLVF.\n");
+		DEBUGOUT("No space in VLVF.");
 
 	return first_empty_slot ? first_empty_slot : NGBE_ERR_NO_SPACE;
 }
@@ -1354,8 +1370,6 @@ s32 ngbe_set_vfta(struct ngbe_hw *hw, u32 vlan, u32 vind,
 {
 	u32 regidx, vfta_delta, vfta;
 	s32 err;
-
-	DEBUGFUNC("ngbe_set_vfta");
 
 	if (vlan > 4095 || vind > 63)
 		return NGBE_ERR_PARAM;
@@ -1423,8 +1437,6 @@ s32 ngbe_set_vlvf(struct ngbe_hw *hw, u32 vlan, u32 vind,
 	u32 bits;
 	u32 portctl;
 	s32 vlvf_index;
-
-	DEBUGFUNC("ngbe_set_vlvf");
 
 	if (vlan > 4095 || vind > 63)
 		return NGBE_ERR_PARAM;
@@ -1505,8 +1517,6 @@ s32 ngbe_clear_vfta(struct ngbe_hw *hw)
 {
 	u32 offset;
 
-	DEBUGFUNC("ngbe_clear_vfta");
-
 	for (offset = 0; offset < hw->mac.vft_size; offset++)
 		wr32(hw, NGBE_VLANTBL(offset), 0);
 
@@ -1534,8 +1544,6 @@ s32 ngbe_check_mac_link_em(struct ngbe_hw *hw, u32 *speed,
 	u32 i, reg;
 	s32 status = 0;
 
-	DEBUGFUNC("ngbe_check_mac_link_em");
-
 	reg = rd32(hw, NGBE_GPIOINTSTAT);
 	wr32(hw, NGBE_GPIOEOI, reg);
 
@@ -1558,19 +1566,20 @@ s32 ngbe_get_link_capabilities_em(struct ngbe_hw *hw,
 				      bool *autoneg)
 {
 	s32 status = 0;
-
-	DEBUGFUNC("\n");
+	u16 value = 0;
 
 	hw->mac.autoneg = *autoneg;
 
-	switch (hw->sub_device_id) {
-	case NGBE_SUB_DEV_ID_EM_RTL_SGMII:
+	if (hw->phy.type == ngbe_phy_rtl) {
 		*speed = NGBE_LINK_SPEED_1GB_FULL |
 			NGBE_LINK_SPEED_100M_FULL |
 			NGBE_LINK_SPEED_10M_FULL;
-		break;
-	default:
-		break;
+	}
+
+	if (hw->phy.type == ngbe_phy_yt8521s_sfi) {
+		ngbe_read_phy_reg_ext_yt(hw, YT_CHIP, 0, &value);
+		if ((value & YT_CHIP_MODE_MASK) == YT_CHIP_MODE_SEL(1))
+			*speed = NGBE_LINK_SPEED_1GB_FULL;
 	}
 
 	return status;
@@ -1581,8 +1590,6 @@ s32 ngbe_setup_mac_link_em(struct ngbe_hw *hw,
 			       bool autoneg_wait_to_complete)
 {
 	s32 status;
-
-	DEBUGFUNC("\n");
 
 	/* Setup the PHY according to input speed */
 	status = hw->phy.setup_link(hw, speed, autoneg_wait_to_complete);
@@ -1607,6 +1614,30 @@ void ngbe_set_mac_anti_spoofing(struct ngbe_hw *hw, bool enable, int vf)
 	else
 		pfvfspoof &= ~(1 << vf);
 	wr32(hw, NGBE_POOLTXASMAC, pfvfspoof);
+}
+
+/**
+ * ngbe_set_pba - Initialize Rx packet buffer
+ * @hw: pointer to hardware structure
+ * @headroom: reserve n KB of headroom
+ **/
+void ngbe_set_pba(struct ngbe_hw *hw)
+{
+	u32 rxpktsize = hw->mac.rx_pb_size;
+	u32 txpktsize, txpbthresh;
+
+	/* Reserve 256 KB of headroom */
+	rxpktsize -= 256;
+
+	rxpktsize <<= 10;
+	wr32(hw, NGBE_PBRXSIZE, rxpktsize);
+
+	/* Only support an equally distributed Tx packet buffer strategy. */
+	txpktsize = NGBE_PBTXSIZE_MAX;
+	txpbthresh = (txpktsize / 1024) - NGBE_TXPKT_SIZE_MAX;
+
+	wr32(hw, NGBE_PBTXSIZE, txpktsize);
+	wr32(hw, NGBE_PBTXDMATH, txpbthresh);
 }
 
 /**
@@ -1639,8 +1670,6 @@ s32 ngbe_init_thermal_sensor_thresh(struct ngbe_hw *hw)
 {
 	struct ngbe_thermal_sensor_data *data = &hw->mac.thermal_sensor_data;
 
-	DEBUGFUNC("ngbe_init_thermal_sensor_thresh");
-
 	memset(data, 0, sizeof(struct ngbe_thermal_sensor_data));
 
 	if (hw->bus.lan_id != 0)
@@ -1663,8 +1692,6 @@ s32 ngbe_mac_check_overtemp(struct ngbe_hw *hw)
 {
 	s32 status = 0;
 	u32 ts_state;
-
-	DEBUGFUNC("ngbe_mac_check_overtemp");
 
 	/* Check that the LASI temp alarm status was triggered */
 	ts_state = rd32(hw, NGBE_TSALM);
@@ -1720,8 +1747,6 @@ s32 ngbe_set_mac_type(struct ngbe_hw *hw)
 {
 	s32 err = 0;
 
-	DEBUGFUNC("ngbe_set_mac_type");
-
 	if (hw->vendor_id != PCI_VENDOR_ID_WANGXUN) {
 		DEBUGOUT("Unsupported vendor id: %x", hw->vendor_id);
 		return NGBE_ERR_DEVICE_NOT_SUPPORTED;
@@ -1732,11 +1757,23 @@ s32 ngbe_set_mac_type(struct ngbe_hw *hw)
 	case NGBE_SUB_DEV_ID_EM_MVL_RGMII:
 		hw->phy.media_type = ngbe_media_type_copper;
 		hw->mac.type = ngbe_mac_em;
+		hw->mac.link_type = ngbe_link_copper;
+		break;
+	case NGBE_SUB_DEV_ID_EM_RTL_YT8521S_SFP:
+		hw->phy.media_type = ngbe_media_type_copper;
+		hw->mac.type = ngbe_mac_em;
+		hw->mac.link_type = ngbe_link_fiber;
 		break;
 	case NGBE_SUB_DEV_ID_EM_MVL_SFP:
 	case NGBE_SUB_DEV_ID_EM_YT8521S_SFP:
 		hw->phy.media_type = ngbe_media_type_fiber;
 		hw->mac.type = ngbe_mac_em;
+		hw->mac.link_type = ngbe_link_fiber;
+		break;
+	case NGBE_SUB_DEV_ID_EM_MVL_MIX:
+		hw->phy.media_type = ngbe_media_type_unknown;
+		hw->mac.type = ngbe_mac_em;
+		hw->mac.link_type = ngbe_link_type_unknown;
 		break;
 	case NGBE_SUB_DEV_ID_EM_VF:
 		hw->phy.media_type = ngbe_media_type_virtual;
@@ -1750,7 +1787,7 @@ s32 ngbe_set_mac_type(struct ngbe_hw *hw)
 		break;
 	}
 
-	DEBUGOUT("found mac: %d media: %d, returns: %d\n",
+	DEBUGOUT("found mac: %d media: %d, returns: %d",
 		  hw->mac.type, hw->phy.media_type, err);
 	return err;
 }
@@ -1764,15 +1801,12 @@ s32 ngbe_set_mac_type(struct ngbe_hw *hw)
  **/
 s32 ngbe_enable_rx_dma(struct ngbe_hw *hw, u32 regval)
 {
-	DEBUGFUNC("ngbe_enable_rx_dma");
-
 	/*
 	 * Workaround silicon errata when enabling the Rx datapath.
 	 * If traffic is incoming before we enable the Rx unit, it could hang
 	 * the Rx DMA unit.  Therefore, make sure the security engine is
 	 * completely disabled prior to enabling the Rx unit.
 	 */
-
 	hw->mac.disable_sec_rx_path(hw);
 
 	if (regval & NGBE_PBRXCTL_ENA)
@@ -1785,10 +1819,63 @@ s32 ngbe_enable_rx_dma(struct ngbe_hw *hw, u32 regval)
 	return 0;
 }
 
+/* cmd_addr is used for some special command:
+ * 1. to be sector address, when implemented erase sector command
+ * 2. to be flash address when implemented read, write flash address
+ *
+ * Return 0 on success, return 1 on failure.
+ */
+u32 ngbe_fmgr_cmd_op(struct ngbe_hw *hw, u32 cmd, u32 cmd_addr)
+{
+	u32 cmd_val, i;
+
+	cmd_val = NGBE_SPICMD_CMD(cmd) | NGBE_SPICMD_CLK(3) | cmd_addr;
+	wr32(hw, NGBE_SPICMD, cmd_val);
+
+	for (i = 0; i < NGBE_SPI_TIMEOUT; i++) {
+		if (rd32(hw, NGBE_SPISTAT) & NGBE_SPISTAT_OPDONE)
+			break;
+
+		usec_delay(10);
+	}
+	if (i == NGBE_SPI_TIMEOUT)
+		return 1;
+
+	return 0;
+}
+
+u32 ngbe_flash_read_dword(struct ngbe_hw *hw, u32 addr)
+{
+	u32 status;
+
+	status = ngbe_fmgr_cmd_op(hw, 1, addr);
+	if (status == 0x1) {
+		DEBUGOUT("Read flash timeout.");
+		return status;
+	}
+
+	return rd32(hw, NGBE_SPIDAT);
+}
+
+void ngbe_read_efuse(struct ngbe_hw *hw)
+{
+	u32 efuse[2];
+	u8 lan_id = hw->bus.lan_id;
+
+	efuse[0] = ngbe_flash_read_dword(hw, 0xfe010 + lan_id * 8);
+	efuse[1] = ngbe_flash_read_dword(hw, 0xfe010 + lan_id * 8 + 4);
+
+	DEBUGOUT("port %d efuse[0] = %08x, efuse[1] = %08x\n",
+		lan_id, efuse[0], efuse[1]);
+
+	hw->gphy_efuse[0] = efuse[0];
+	hw->gphy_efuse[1] = efuse[1];
+}
+
 void ngbe_map_device_id(struct ngbe_hw *hw)
 {
 	u16 oem = hw->sub_system_id & NGBE_OEM_MASK;
-	u16 internal = hw->sub_system_id & NGBE_INTERNAL_MASK;
+
 	hw->is_pf = true;
 
 	/* move subsystem_device_id to device_id */
@@ -1822,20 +1909,31 @@ void ngbe_map_device_id(struct ngbe_hw *hw)
 	case NGBE_DEV_ID_EM_WX1860A1:
 	case NGBE_DEV_ID_EM_WX1860A1L:
 		hw->device_id = NGBE_DEV_ID_EM;
-		if (oem == NGBE_LY_M88E1512_SFP ||
-				internal == NGBE_INTERNAL_SFP)
+		if (oem == NGBE_M88E1512_SFP || oem == NGBE_LY_M88E1512_SFP)
 			hw->sub_device_id = NGBE_SUB_DEV_ID_EM_MVL_SFP;
-		else if (hw->sub_system_id == NGBE_SUB_DEV_ID_EM_M88E1512_RJ45)
+		else if (oem == NGBE_M88E1512_RJ45 ||
+			(hw->sub_system_id == NGBE_SUB_DEV_ID_EM_M88E1512_RJ45))
 			hw->sub_device_id = NGBE_SUB_DEV_ID_EM_MVL_RGMII;
+		else if (oem == NGBE_M88E1512_MIX)
+			hw->sub_device_id = NGBE_SUB_DEV_ID_EM_MVL_MIX;
 		else if (oem == NGBE_YT8521S_SFP ||
-				oem == NGBE_LY_YT8521S_SFP)
+			 oem == NGBE_YT8521S_SFP_GPIO ||
+			 oem == NGBE_LY_YT8521S_SFP)
 			hw->sub_device_id = NGBE_SUB_DEV_ID_EM_YT8521S_SFP;
+		else if (oem == NGBE_INTERNAL_YT8521S_SFP ||
+			 oem == NGBE_INTERNAL_YT8521S_SFP_GPIO)
+			hw->sub_device_id = NGBE_SUB_DEV_ID_EM_RTL_YT8521S_SFP;
 		else
 			hw->sub_device_id = NGBE_SUB_DEV_ID_EM_RTL_SGMII;
 		break;
 	default:
 		break;
 	}
+
+	if (oem == NGBE_LY_M88E1512_SFP || oem == NGBE_YT8521S_SFP_GPIO ||
+			oem == NGBE_INTERNAL_YT8521S_SFP_GPIO ||
+			oem == NGBE_LY_YT8521S_SFP)
+		hw->gpio_ctl = true;
 }
 
 /**
@@ -1853,8 +1951,6 @@ s32 ngbe_init_ops_pf(struct ngbe_hw *hw)
 	struct ngbe_rom_info *rom = &hw->rom;
 	struct ngbe_mbx_info *mbx = &hw->mbx;
 
-	DEBUGFUNC("ngbe_init_ops_pf");
-
 	/* BUS */
 	bus->set_lan_id = ngbe_set_lan_id_multi_port;
 
@@ -1865,6 +1961,7 @@ s32 ngbe_init_ops_pf(struct ngbe_hw *hw)
 	phy->read_reg_unlocked = ngbe_read_phy_reg_mdi;
 	phy->write_reg_unlocked = ngbe_write_phy_reg_mdi;
 	phy->reset_hw = ngbe_reset_phy;
+	phy->led_oem_chk = ngbe_phy_led_oem_chk;
 
 	/* MAC */
 	mac->init_hw = ngbe_init_hw;
@@ -1907,6 +2004,8 @@ s32 ngbe_init_ops_pf(struct ngbe_hw *hw)
 	mac->check_link = ngbe_check_mac_link_em;
 	mac->setup_link = ngbe_setup_mac_link_em;
 
+	mac->setup_pba = ngbe_set_pba;
+
 	/* Manageability interface */
 	mac->init_thermal_sensor_thresh = ngbe_init_thermal_sensor_thresh;
 	mac->check_overtemp = ngbe_mac_check_overtemp;
@@ -1928,6 +2027,7 @@ s32 ngbe_init_ops_pf(struct ngbe_hw *hw)
 	mac->mcft_size		= NGBE_EM_MC_TBL_SIZE;
 	mac->vft_size		= NGBE_EM_VFT_TBL_SIZE;
 	mac->num_rar_entries	= NGBE_EM_RAR_ENTRIES;
+	mac->rx_pb_size		= NGBE_EM_RX_PB_SIZE;
 	mac->max_rx_queues	= NGBE_EM_MAX_RX_QUEUES;
 	mac->max_tx_queues	= NGBE_EM_MAX_TX_QUEUES;
 
@@ -1952,8 +2052,6 @@ s32 ngbe_init_ops_pf(struct ngbe_hw *hw)
 s32 ngbe_init_shared_code(struct ngbe_hw *hw)
 {
 	s32 status = 0;
-
-	DEBUGFUNC("ngbe_init_shared_code");
 
 	/*
 	 * Set the mac type

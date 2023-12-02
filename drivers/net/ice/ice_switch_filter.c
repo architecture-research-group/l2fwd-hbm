@@ -206,6 +206,7 @@ static struct ice_flow_parser ice_switch_perm_parser;
 
 static struct
 ice_pattern_match_item ice_switch_pattern_dist_list[] = {
+	{pattern_any,					ICE_INSET_NONE,				ICE_INSET_NONE,				ICE_INSET_NONE},
 	{pattern_ethertype,				ICE_SW_INSET_ETHER,			ICE_INSET_NONE,				ICE_INSET_NONE},
 	{pattern_ethertype_vlan,			ICE_SW_INSET_MAC_VLAN,			ICE_INSET_NONE,				ICE_INSET_NONE},
 	{pattern_ethertype_qinq,			ICE_SW_INSET_MAC_QINQ,			ICE_INSET_NONE,				ICE_INSET_NONE},
@@ -289,6 +290,7 @@ ice_pattern_match_item ice_switch_pattern_dist_list[] = {
 
 static struct
 ice_pattern_match_item ice_switch_pattern_perm_list[] = {
+	{pattern_any,					ICE_INSET_NONE,				ICE_INSET_NONE,				ICE_INSET_NONE},
 	{pattern_ethertype,				ICE_SW_INSET_ETHER,			ICE_INSET_NONE,				ICE_INSET_NONE},
 	{pattern_ethertype_vlan,			ICE_SW_INSET_MAC_VLAN,			ICE_INSET_NONE,				ICE_INSET_NONE},
 	{pattern_ethertype_qinq,			ICE_SW_INSET_MAC_QINQ,			ICE_INSET_NONE,				ICE_INSET_NONE},
@@ -400,6 +402,14 @@ ice_switch_create(struct ice_adapter *ad,
 			"lookup list should not be NULL");
 		goto error;
 	}
+
+	if (ice_dcf_adminq_need_retry(ad)) {
+		rte_flow_error_set(error, EAGAIN,
+			RTE_FLOW_ERROR_TYPE_ITEM, NULL,
+			"DCF is not on");
+		goto error;
+	}
+
 	ret = ice_add_adv_rule(hw, list, lkups_cnt, rule_info, &rule_added);
 	if (!ret) {
 		filter_conf_ptr = rte_zmalloc("ice_switch_filter",
@@ -423,7 +433,12 @@ ice_switch_create(struct ice_adapter *ad,
 
 		flow->rule = filter_conf_ptr;
 	} else {
-		rte_flow_error_set(error, EINVAL,
+		if (ice_dcf_adminq_need_retry(ad))
+			ret = -EAGAIN;
+		else
+			ret = -EINVAL;
+
+		rte_flow_error_set(error, -ret,
 			RTE_FLOW_ERROR_TYPE_HANDLE, NULL,
 			"switch filter create flow fail");
 		goto error;
@@ -475,9 +490,21 @@ ice_switch_destroy(struct ice_adapter *ad,
 		return -rte_errno;
 	}
 
+	if (ice_dcf_adminq_need_retry(ad)) {
+		rte_flow_error_set(error, EAGAIN,
+			RTE_FLOW_ERROR_TYPE_ITEM, NULL,
+			"DCF is not on");
+		return -rte_errno;
+	}
+
 	ret = ice_rem_adv_rule_by_id(hw, &filter_conf_ptr->sw_query_data);
 	if (ret) {
-		rte_flow_error_set(error, EINVAL,
+		if (ice_dcf_adminq_need_retry(ad))
+			ret = -EAGAIN;
+		else
+			ret = -EINVAL;
+
+		rte_flow_error_set(error, -ret,
 			RTE_FLOW_ERROR_TYPE_HANDLE, NULL,
 			"fail to destroy switch filter rule");
 		return -rte_errno;
@@ -557,6 +584,10 @@ ice_switch_parse_pattern(const struct rte_flow_item pattern[],
 		item_type = item->type;
 
 		switch (item_type) {
+		case RTE_FLOW_ITEM_TYPE_ANY:
+			*tun_type = ICE_SW_TUN_AND_NON_TUN;
+			break;
+
 		case RTE_FLOW_ITEM_TYPE_ETH:
 			eth_spec = item->spec;
 			eth_mask = item->mask;
@@ -1587,33 +1618,67 @@ ice_switch_parse_dcf_action(struct ice_dcf_adapter *ad,
 			    struct rte_flow_error *error,
 			    struct ice_adv_rule_info *rule_info)
 {
-	const struct rte_flow_action_vf *act_vf;
+	const struct rte_flow_action_ethdev *act_ethdev;
 	const struct rte_flow_action *action;
+	const struct rte_eth_dev *repr_dev;
 	enum rte_flow_action_type action_type;
+	uint16_t rule_port_id, backer_port_id;
 
 	for (action = actions; action->type !=
 				RTE_FLOW_ACTION_TYPE_END; action++) {
 		action_type = action->type;
 		switch (action_type) {
-		case RTE_FLOW_ACTION_TYPE_VF:
+		case RTE_FLOW_ACTION_TYPE_PORT_REPRESENTOR:
 			rule_info->sw_act.fltr_act = ICE_FWD_TO_VSI;
-			act_vf = action->conf;
+			act_ethdev = action->conf;
 
-			if (act_vf->id >= ad->real_hw.num_vfs &&
-				!act_vf->original) {
-				rte_flow_error_set(error,
-					EINVAL, RTE_FLOW_ERROR_TYPE_ACTION,
-					actions,
-					"Invalid vf id");
-				return -rte_errno;
-			}
+			if (!rte_eth_dev_is_valid_port(act_ethdev->port_id))
+				goto invalid_port_id;
 
-			if (act_vf->original)
-				rule_info->sw_act.vsi_handle =
-					ad->real_hw.avf.bus.func;
-			else
-				rule_info->sw_act.vsi_handle = act_vf->id;
+			/* For traffic to original DCF port */
+			rule_port_id = ad->parent.pf.dev_data->port_id;
+
+			if (rule_port_id != act_ethdev->port_id)
+				goto invalid_port_id;
+
+			rule_info->sw_act.vsi_handle = 0;
+
 			break;
+
+invalid_port_id:
+			rte_flow_error_set(error,
+						EINVAL, RTE_FLOW_ERROR_TYPE_ACTION,
+						actions,
+						"Invalid port_id");
+			return -rte_errno;
+
+		case RTE_FLOW_ACTION_TYPE_REPRESENTED_PORT:
+			rule_info->sw_act.fltr_act = ICE_FWD_TO_VSI;
+			act_ethdev = action->conf;
+
+			if (!rte_eth_dev_is_valid_port(act_ethdev->port_id))
+				goto invalid;
+
+			repr_dev = &rte_eth_devices[act_ethdev->port_id];
+
+			if (!repr_dev->data)
+				goto invalid;
+
+			rule_port_id = ad->parent.pf.dev_data->port_id;
+			backer_port_id = repr_dev->data->backer_port_id;
+
+			if (backer_port_id != rule_port_id)
+				goto invalid;
+
+			rule_info->sw_act.vsi_handle = repr_dev->data->representor_id;
+			break;
+
+invalid:
+			rte_flow_error_set(error,
+						EINVAL, RTE_FLOW_ERROR_TYPE_ACTION,
+						actions,
+						"Invalid ethdev_port_id");
+			return -rte_errno;
 
 		case RTE_FLOW_ACTION_TYPE_DROP:
 			rule_info->sw_act.fltr_act = ICE_DROP_PACKET;
@@ -1754,10 +1819,11 @@ ice_switch_check_action(const struct rte_flow_action *actions,
 				RTE_FLOW_ACTION_TYPE_END; action++) {
 		action_type = action->type;
 		switch (action_type) {
-		case RTE_FLOW_ACTION_TYPE_VF:
 		case RTE_FLOW_ACTION_TYPE_RSS:
 		case RTE_FLOW_ACTION_TYPE_QUEUE:
 		case RTE_FLOW_ACTION_TYPE_DROP:
+		case RTE_FLOW_ACTION_TYPE_REPRESENTED_PORT:
+		case RTE_FLOW_ACTION_TYPE_PORT_REPRESENTOR:
 			actions_num++;
 			break;
 		case RTE_FLOW_ACTION_TYPE_VOID:
@@ -1832,7 +1898,10 @@ ice_switch_parse_pattern_action(struct ice_adapter *ad,
 	else if (vlan_num == 2)
 		tun_type = ICE_NON_TUN_QINQ;
 
-	list = rte_zmalloc(NULL, item_num * sizeof(*list), 0);
+	/* reserve one more memory slot for direction flag which may
+	 * consume 1 lookup item.
+	 */
+	list = rte_zmalloc(NULL, (item_num + 1) * sizeof(*list), 0);
 	if (!list) {
 		rte_flow_error_set(error, EINVAL,
 				   RTE_FLOW_ERROR_TYPE_HANDLE, NULL,
@@ -2016,6 +2085,12 @@ ice_switch_redirect(struct ice_adapter *ad,
 	}
 
 rmv_rule:
+	if (ice_dcf_adminq_need_retry(ad)) {
+		PMD_DRV_LOG(WARNING, "DCF is not on");
+		ret = -EAGAIN;
+		goto out;
+	}
+
 	/* Remove the old rule */
 	ret = ice_rem_adv_rule(hw, lkups_ref, lkups_cnt, &rinfo);
 	if (ret) {
@@ -2028,6 +2103,12 @@ rmv_rule:
 	}
 
 add_rule:
+	if (ice_dcf_adminq_need_retry(ad)) {
+		PMD_DRV_LOG(WARNING, "DCF is not on");
+		ret = -EAGAIN;
+		goto out;
+	}
+
 	/* Update VSI context */
 	hw->vsi_ctx[rd->vsi_handle]->vsi_num = rd->new_vsi_num;
 
@@ -2047,6 +2128,10 @@ add_rule:
 	}
 
 out:
+	if (ret == -EINVAL)
+		if (ice_dcf_adminq_need_retry(ad))
+			ret = -EAGAIN;
+
 	ice_free(hw, lkups_dp);
 	return ret;
 }

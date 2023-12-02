@@ -114,6 +114,9 @@ static inline s32 ngbe_mac_get_link_capabilities_dummy(struct ngbe_hw *TUP0,
 {
 	return NGBE_ERR_OPS_DUMMY;
 }
+static inline void ngbe_setup_pba_dummy(struct ngbe_hw *TUP0)
+{
+}
 static inline s32 ngbe_mac_led_on_dummy(struct ngbe_hw *TUP0, u32 TUP1)
 {
 	return NGBE_ERR_OPS_DUMMY;
@@ -234,6 +237,10 @@ static inline s32 ngbe_phy_check_link_dummy(struct ngbe_hw *TUP0, u32 *TUP1,
 {
 	return NGBE_ERR_OPS_DUMMY;
 }
+static inline s32 ngbe_phy_set_phy_power_dummy(struct ngbe_hw *TUP0, bool TUP1)
+{
+	return NGBE_ERR_OPS_DUMMY;
+}
 static inline s32 ngbe_get_phy_advertised_pause_dummy(struct ngbe_hw *TUP0,
 					u8 *TUP1)
 {
@@ -245,6 +252,10 @@ static inline s32 ngbe_get_phy_lp_advertised_pause_dummy(struct ngbe_hw *TUP0,
 	return NGBE_ERR_OPS_DUMMY;
 }
 static inline s32 ngbe_set_phy_pause_adv_dummy(struct ngbe_hw *TUP0, u16 TUP1)
+{
+	return NGBE_ERR_OPS_DUMMY;
+}
+static inline s32 ngbe_phy_led_oem_chk_dummy(struct ngbe_hw *TUP0, u32 *TUP1)
 {
 	return NGBE_ERR_OPS_DUMMY;
 }
@@ -298,6 +309,7 @@ static inline void ngbe_init_ops_dummy(struct ngbe_hw *hw)
 	hw->mac.setup_link = ngbe_mac_setup_link_dummy;
 	hw->mac.check_link = ngbe_mac_check_link_dummy;
 	hw->mac.get_link_capabilities = ngbe_mac_get_link_capabilities_dummy;
+	hw->mac.setup_pba = ngbe_setup_pba_dummy;
 	hw->mac.led_on = ngbe_mac_led_on_dummy;
 	hw->mac.led_off = ngbe_mac_led_off_dummy;
 	hw->mac.set_rar = ngbe_mac_set_rar_dummy;
@@ -328,6 +340,8 @@ static inline void ngbe_init_ops_dummy(struct ngbe_hw *hw)
 	hw->phy.get_adv_pause = ngbe_get_phy_advertised_pause_dummy;
 	hw->phy.get_lp_adv_pause = ngbe_get_phy_lp_advertised_pause_dummy;
 	hw->phy.set_pause_adv = ngbe_set_phy_pause_adv_dummy;
+	hw->phy.led_oem_chk = ngbe_phy_led_oem_chk_dummy;
+	hw->phy.set_phy_power = ngbe_phy_set_phy_power_dummy;
 	hw->mbx.init_params = ngbe_mbx_init_params_dummy;
 	hw->mbx.read = ngbe_mbx_read_dummy;
 	hw->mbx.write = ngbe_mbx_write_dummy;

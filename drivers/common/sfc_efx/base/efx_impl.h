@@ -173,7 +173,8 @@ typedef struct efx_rx_ops_s {
 #if EFSYS_OPT_RX_SCALE
 	efx_rc_t	(*erxo_scale_context_alloc)(efx_nic_t *,
 						    efx_rx_scale_context_type_t,
-						    uint32_t, uint32_t *);
+						    uint32_t, uint32_t,
+						    uint32_t *);
 	efx_rc_t	(*erxo_scale_context_free)(efx_nic_t *, uint32_t);
 	efx_rc_t	(*erxo_scale_mode_set)(efx_nic_t *, uint32_t,
 					       efx_rx_hash_alg_t,
@@ -1554,6 +1555,12 @@ extern	__checkReturn		efx_rc_t
 efx_mcdi_intf_from_pcie(
 	__in			uint32_t pcie_intf,
 	__out			efx_pcie_interface_t *efx_intf);
+
+LIBEFX_INTERNAL
+extern	__checkReturn		efx_rc_t
+efx_mcdi_intf_to_pcie(
+	__in			efx_pcie_interface_t efx_intf,
+	__out			uint32_t *pcie_intf);
 
 LIBEFX_INTERNAL
 extern	__checkReturn	efx_rc_t

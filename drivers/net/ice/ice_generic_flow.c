@@ -28,6 +28,8 @@
 /*Pipeline mode, fdir used at distributor stage*/
 #define ICE_FLOW_CLASSIFY_STAGE_DISTRIBUTOR 2
 
+#define ICE_FLOW_ENGINE_DISABLED(mask, type) ((mask) & BIT(type))
+
 static struct ice_engine_list engine_list =
 		TAILQ_HEAD_INITIALIZER(engine_list);
 
@@ -62,6 +64,11 @@ const struct rte_flow_ops ice_flow_ops = {
 
 /* empty */
 enum rte_flow_item_type pattern_empty[] = {
+	RTE_FLOW_ITEM_TYPE_END,
+};
+
+enum rte_flow_item_type pattern_any[] = {
+	RTE_FLOW_ITEM_TYPE_ANY,
 	RTE_FLOW_ITEM_TYPE_END,
 };
 
@@ -1826,11 +1833,19 @@ ice_flow_init(struct ice_adapter *ad)
 	TAILQ_INIT(&pf->dist_parser_list);
 	rte_spinlock_init(&pf->flow_ops_lock);
 
+	if (ice_parser_create(&ad->hw, &ad->psr) != ICE_SUCCESS)
+		PMD_INIT_LOG(WARNING, "Failed to initialize DDP parser, raw packet filter will not be supported");
+
 	RTE_TAILQ_FOREACH_SAFE(engine, &engine_list, node, temp) {
 		if (engine->init == NULL) {
 			PMD_INIT_LOG(ERR, "Invalid engine type (%d)",
 					engine->type);
 			return -ENOTSUP;
+		}
+
+		if (ICE_FLOW_ENGINE_DISABLED(ad->disabled_engine_mask, engine->type)) {
+			PMD_INIT_LOG(INFO, "Engine %d disabled", engine->type);
+			continue;
 		}
 
 		ret = engine->init(ad);
@@ -1853,6 +1868,11 @@ ice_flow_uninit(struct ice_adapter *ad)
 	void *temp;
 
 	RTE_TAILQ_FOREACH_SAFE(engine, &engine_list, node, temp) {
+		if (ICE_FLOW_ENGINE_DISABLED(ad->disabled_engine_mask, engine->type)) {
+			PMD_DRV_LOG(DEBUG, "Engine %d disabled skip it", engine->type);
+			continue;
+		}
+
 		if (engine->uninit)
 			engine->uninit(ad);
 	}
@@ -1879,6 +1899,11 @@ ice_flow_uninit(struct ice_adapter *ad)
 	while ((p_parser = TAILQ_FIRST(&pf->dist_parser_list))) {
 		TAILQ_REMOVE(&pf->dist_parser_list, p_parser, node);
 		rte_free(p_parser);
+	}
+
+	if (ad->psr != NULL) {
+		ice_parser_destroy(ad->psr);
+		ad->psr = NULL;
 	}
 }
 
@@ -2111,6 +2136,7 @@ struct ice_ptype_match {
 
 static struct ice_ptype_match ice_ptype_map[] = {
 	{pattern_raw,					ICE_PTYPE_IPV4_PAY},
+	{pattern_any,					ICE_PTYPE_IPV4_PAY},
 	{pattern_eth_ipv4,				ICE_PTYPE_IPV4_PAY},
 	{pattern_eth_ipv4_udp,				ICE_PTYPE_IPV4_UDP_PAY},
 	{pattern_eth_ipv4_tcp,				ICE_PTYPE_IPV4_TCP_PAY},
@@ -2515,7 +2541,9 @@ ice_flow_flush(struct rte_eth_dev *dev,
 		ret = ice_flow_destroy(dev, p_flow, error);
 		if (ret) {
 			PMD_DRV_LOG(ERR, "Failed to flush flows");
-			return -EINVAL;
+			if (ret != -EAGAIN)
+				ret = -EINVAL;
+			return ret;
 		}
 	}
 

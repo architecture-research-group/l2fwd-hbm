@@ -227,7 +227,7 @@ struct virtio_net_ctrl_rss {
  * Control link announce acknowledgement
  *
  * The command VIRTIO_NET_CTRL_ANNOUNCE_ACK is used to indicate that
- * driver has recevied the notification; device would clear the
+ * driver has received the notification; device would clear the
  * VIRTIO_NET_S_ANNOUNCE bit in the status field after it receives
  * this command.
  */
@@ -309,10 +309,10 @@ struct virtqueue {
 
 	uint16_t  *notify_addr;
 	struct rte_mbuf **sw_ring;  /**< RX software ring. */
-	struct vq_desc_extra vq_descx[0];
+	struct vq_desc_extra vq_descx[];
 };
 
-/* If multiqueue is provided by host, then we suppport it. */
+/* If multiqueue is provided by host, then we support it. */
 #define VIRTIO_NET_CTRL_MQ   4
 
 #define VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET        0
@@ -474,10 +474,6 @@ virtqueue_enable_intr(struct virtqueue *vq)
 		virtqueue_enable_intr_split(vq);
 }
 
-/**
- *  Dump virtqueue internal structures, for debug purpose only.
- */
-void virtqueue_dump(struct virtqueue *vq);
 /**
  *  Get all mbufs to be freed.
  */

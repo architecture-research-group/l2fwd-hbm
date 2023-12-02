@@ -14,8 +14,9 @@ Deprecation Notices
 * kvargs: The function ``rte_kvargs_process`` will get a new parameter
   for returning key match count. It will ease handling of no-match case.
 
-* eal: The function ``rte_eal_remote_launch`` will return new error codes
-  after read or write error on the pipe, instead of calling ``rte_panic``.
+* eal: RTE_FUNC_PTR_OR_* macros have been marked deprecated and will be removed
+  in the future. Applications can use ``devtools/cocci/func_or_ret.cocci``
+  to update their code.
 
 * rte_atomicNN_xxx: These APIs do not take memory order parameter. This does
   not allow for writing optimized code for all the CPU architectures supported
@@ -32,21 +33,12 @@ Deprecation Notices
   ``__atomic_thread_fence`` must be used for patches that need to be merged in
   20.08 onwards. This change will not introduce any performance degradation.
 
-* mempool: Helper macro ``MEMPOOL_HEADER_SIZE()`` is deprecated and will
-  be removed in DPDK 22.11. The replacement macro
-  ``RTE_MEMPOOL_HEADER_SIZE()`` is internal only.
-
-* mempool: Macro to register mempool driver ``MEMPOOL_REGISTER_OPS()`` is
-  deprecated and will be removed in DPDK 22.11. Use replacement macro
-  ``RTE_MEMPOOL_REGISTER_OPS()``.
-
-* mempool: The mempool API macros ``MEMPOOL_PG_*`` are deprecated and
-  will be removed in DPDK 22.11.
-
-* pci: To reduce unnecessary ABIs exposed by DPDK bus driver, "rte_bus_pci.h"
-  will be made internal in 21.11 and macros/data structures/functions defined
-  in the header will not be considered as ABI anymore. This change is inspired
-  by the RFC https://patchwork.dpdk.org/project/dpdk/list/?series=17176.
+* kni: The KNI kernel module and library are not recommended for use by new
+  applications - other technologies such as virtio-user are recommended instead.
+  Following the DPDK technical board
+  `decision <https://mails.dpdk.org/archives/dev/2021-January/197077.html>`_
+  and `refinement <https://mails.dpdk.org/archives/dev/2022-June/243596.html>`_,
+  the KNI kernel module, library and PMD will be removed from the DPDK 23.11 release.
 
 * lib: will fix extending some enum/define breaking the ABI. There are multiple
   samples in DPDK that enum/define terminated with a ``.*MAX.*`` value which is
@@ -61,10 +53,6 @@ Deprecation Notices
   Need to identify this kind of usages and fix in 20.11, otherwise this blocks
   us extending existing enum/define.
   One solution can be using a fixed size array instead of ``.*MAX.*`` value.
-
-* ethdev: The flow director API, including ``rte_eth_conf.fdir_conf`` field,
-  and the related structures (``rte_fdir_*`` and ``rte_eth_fdir_*``),
-  will be removed in DPDK 20.11.
 
 * ethdev: Announce moving from dedicated modify function for each field,
   to using the general ``rte_flow_modify_field`` action.
@@ -86,16 +74,13 @@ Deprecation Notices
   will be limited to maximum 256 queues.
   Also compile time flag ``RTE_ETHDEV_QUEUE_STAT_CNTRS`` will be removed.
 
-* ethdev: Items and actions ``PF``, ``VF``, ``PHY_PORT``, ``PORT_ID`` are
-  deprecated as hard-to-use / ambiguous and will be removed in DPDK 22.11.
-
-* ethdev: The use of attributes ``ingress`` / ``egress`` in "transfer" flows
-  is deprecated as ambiguous with respect to the embedded switch. The use of
-  these attributes will become invalid starting from DPDK 22.11.
-
-* ethdev: Actions ``OF_SET_MPLS_TTL``, ``OF_DEC_MPLS_TTL``, ``OF_SET_NW_TTL``,
-  ``OF_COPY_TTL_OUT``, ``OF_COPY_TTL_IN`` are deprecated as not supported by
-  any PMD, so they will be removed in DPDK 22.11.
+* ethdev: Flow actions ``PF`` and ``VF`` have been deprecated since DPDK 21.11
+  and are yet to be removed. That still has not happened because there are net
+  drivers which support combined use of either action ``PF`` or action ``VF``
+  with action ``QUEUE``, namely, i40e, ixgbe and txgbe (L2 tunnel rule).
+  It is unclear whether it is acceptable to just drop support for
+  such a complex use case, so maintainers of the said drivers
+  should take a closer look at this and provide assistance.
 
 * ethdev: Actions ``OF_DEC_NW_TTL``, ``SET_IPV4_SRC``, ``SET_IPV4_DST``,
   ``SET_IPV6_SRC``, ``SET_IPV6_DST``, ``SET_TP_SRC``, ``SET_TP_DST``,
@@ -107,38 +92,13 @@ Deprecation Notices
   alternative is implemented.
   The legacy actions should be removed in DPDK 22.11.
 
-* cryptodev: Hide structures ``rte_cryptodev_sym_session`` and
-  ``rte_cryptodev_asym_session`` to remove unnecessary indirection between
-  session and the private data of session. An opaque pointer can be exposed
-  directly to application which can be attached to the ``rte_crypto_op``.
+* cryptodev: The function ``rte_cryptodev_cb_fn`` will be updated
+  to have another parameter ``qp_id`` to return the queue pair ID
+  which got error interrupt to the application,
+  so that application can reset that particular queue pair.
 
-* security: Hide structure ``rte_security_session`` and expose an opaque
-  pointer for the private data to the application which can be attached
-  to the packet while enqueuing.
-
-* metrics: The function ``rte_metrics_init`` will have a non-void return
-  in order to notify errors instead of calling ``rte_exit``.
-
-* raw/ioat: The ``ioat`` rawdev driver has been deprecated, since it's
-  functionality is provided through the new ``dmadev`` infrastructure.
-  To continue to use hardware previously supported by the ``ioat`` rawdev driver,
-  applications should be updated to use the ``dmadev`` library instead,
-  with the underlying HW-functionality being provided by the ``ioat`` or
-  ``idxd`` dma drivers
-
-* drivers/octeontx2: remove octeontx2 drivers
-
-  In the view of enabling unified driver for ``octeontx2(cn9k)``/``octeontx3(cn10k)``,
-  removing ``drivers/octeontx2`` drivers and replace with ``drivers/cnxk/`` which
-  supports both ``octeontx2(cn9k)`` and ``octeontx3(cn10k)`` SoCs.
-  This deprecation notice is to do following actions in DPDK v22.02 version.
-
-  #. Replace ``drivers/common/octeontx2/`` with ``drivers/common/cnxk/``
-  #. Replace ``drivers/mempool/octeontx2/`` with ``drivers/mempool/cnxk/``
-  #. Replace ``drivers/net/octeontx2/`` with ``drivers/net/cnxk/``
-  #. Replace ``drivers/event/octeontx2/`` with ``drivers/event/cnxk/``
-  #. Replace ``drivers/crypto/octeontx2/`` with ``drivers/crypto/cnxk/``
-  #. Rename ``drivers/regex/octeontx2/`` as ``drivers/regex/cn9k/``
-  #. Rename ``config/arm/arm64_octeontx2_linux_gcc`` as ``config/arm/arm64_cn9k_linux_gcc``
-
-  Last two actions are to align naming convention as cnxk scheme.
+* flow_classify: The flow_classify library and example have no maintainer.
+  The library is experimental and, as such, it could be removed from DPDK.
+  Its removal has been postponed to let potential users report interest
+  in maintaining it.
+  In the absence of such interest, this library will be removed in DPDK 23.11.

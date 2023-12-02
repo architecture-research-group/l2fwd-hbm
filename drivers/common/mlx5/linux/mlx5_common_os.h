@@ -8,12 +8,15 @@
 #include <stdio.h>
 #include <malloc.h>
 
+#include <rte_compat.h>
 #include <rte_pci.h>
+#include <bus_pci_driver.h>
 #include <rte_debug.h>
 #include <rte_atomic.h>
 #include <rte_log.h>
 #include <rte_kvargs.h>
 #include <rte_devargs.h>
+#include <rte_interrupts.h>
 
 #include "mlx5_autoconf.h"
 #include "mlx5_glue.h"
@@ -203,12 +206,6 @@ mlx5_os_get_devx_uar_page_id(void *uar)
 #endif
 }
 
-static inline int
-mlx5_os_dealloc_pd(void *pd)
-{
-	return mlx5_glue->dealloc_pd(pd);
-}
-
 __rte_internal
 static inline void *
 mlx5_os_umem_reg(void *ctx, void *addr, size_t size, uint32_t access)
@@ -300,7 +297,18 @@ mlx5_set_context_attr(struct rte_device *dev, struct ibv_context *ctx);
  *  0 if OFED doesn't support.
  *  >0 if success.
  */
+__rte_internal
 int
 mlx5_get_device_guid(const struct rte_pci_addr *dev, uint8_t *guid, size_t len);
+
+__rte_internal
+struct rte_intr_handle *
+mlx5_os_interrupt_handler_create(int mode, bool set_fd_nonblock, int fd,
+				 rte_intr_callback_fn cb, void *cb_arg);
+
+__rte_internal
+void
+mlx5_os_interrupt_handler_destroy(struct rte_intr_handle *intr_handle,
+				  rte_intr_callback_fn cb, void *cb_arg);
 
 #endif /* RTE_PMD_MLX5_COMMON_OS_H_ */

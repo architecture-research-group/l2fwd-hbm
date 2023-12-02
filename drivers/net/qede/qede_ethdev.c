@@ -322,8 +322,8 @@ qede_assign_rxtx_handlers(struct rte_eth_dev *dev, bool is_dummy)
 	bool use_tx_offload = false;
 
 	if (is_dummy) {
-		dev->rx_pkt_burst = qede_rxtx_pkts_dummy;
-		dev->tx_pkt_burst = qede_rxtx_pkts_dummy;
+		dev->rx_pkt_burst = rte_eth_pkt_burst_dummy;
+		dev->tx_pkt_burst = rte_eth_pkt_burst_dummy;
 		return;
 	}
 
@@ -358,7 +358,7 @@ qede_assign_rxtx_handlers(struct rte_eth_dev *dev, bool is_dummy)
 static void
 qede_alloc_etherdev(struct qede_dev *qdev, struct qed_dev_eth_info *info)
 {
-	rte_memcpy(&qdev->dev_info, info, sizeof(*info));
+	qdev->dev_info = *info;
 	qdev->ops = qed_ops;
 }
 
@@ -2338,7 +2338,7 @@ static int qede_set_mtu(struct rte_eth_dev *dev, uint16_t mtu)
 		if (fp->rxq != NULL) {
 			bufsz = (uint16_t)rte_pktmbuf_data_room_size(
 				fp->rxq->mb_pool) - RTE_PKTMBUF_HEADROOM;
-			/* cache align the mbuf size to simplfy rx_buf_size
+			/* cache align the mbuf size to simplify rx_buf_size
 			 * calculation
 			 */
 			bufsz = QEDE_FLOOR_TO_CACHE_LINE_SIZE(bufsz);

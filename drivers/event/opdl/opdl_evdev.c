@@ -3,9 +3,10 @@
  */
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 
-#include <rte_bus_vdev.h>
+#include <bus_vdev_driver.h>
 #include <rte_lcore.h>
 #include <rte_memzone.h>
 #include <rte_kvargs.h>
@@ -703,7 +704,7 @@ opdl_probe(struct rte_vdev_device *vdev)
 	}
 
 	PMD_DRV_LOG(INFO, "DEV_ID:[%02d] : "
-		      "Success - creating eventdev device %s, numa_node:[%d], do_valdation:[%s]"
+		      "Success - creating eventdev device %s, numa_node:[%d], do_validation:[%s]"
 			  " , self_test:[%s]\n",
 		      dev->data->dev_id,
 		      name,
