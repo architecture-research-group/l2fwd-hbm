@@ -38,6 +38,8 @@
 #include <rte_mbuf.h>
 #include <rte_string_fns.h>
 
+#include <hbwmalloc.h>
+
 static volatile bool force_quit;
 
 /* MAC updating enabled by default */
@@ -203,7 +205,7 @@ l2fwd_simple_forward(struct rte_mbuf *m, unsigned portid)
 static void
 l2fwd_main_loop(void)
 {
-	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
+	struct rte_mbuf *pkts_burst[MAX_PKT_BURST]; /* Allocate rx packets array on HBM*/
 	struct rte_mbuf *m;
 	int sent;
 	unsigned lcore_id;
@@ -666,6 +668,7 @@ main(int argc, char **argv)
 	argc -= ret;
 	argv += ret;
 
+	printf("L2fwd HBM\n");
 	force_quit = false;
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
