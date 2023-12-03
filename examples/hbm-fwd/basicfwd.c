@@ -21,6 +21,8 @@
 #define MBUF_CACHE_SIZE 250
 #define BURST_SIZE 32
 
+#define PAGE_SIZE 4096
+
 /* basicfwd.c: Basic DPDK skeleton forwarding example. */
 
 /*
@@ -162,7 +164,8 @@ main(int argc, char *argv[])
 	uint16_t portid;
 
 	void * hb_virt_addr;
-	uint16_t requested_len;
+	size_t requested_len;
+	size_t hbm_alloc_len;
 
 	int hbm_sid;
 	/* Initializion the Environment Abstraction Layer (EAL). 8< */
@@ -179,7 +182,11 @@ main(int argc, char *argv[])
 	printf("number of ports:%d\n", nb_ports);
 
 	/* Allocate external HBM memory */
-	requested_len =  (NUM_MBUFS * nb_ports + MBUF_CACHE_SIZE + RTE_MBUF_DEFAULT_BUF_SIZE) * 4096;
+	requested_len =  (NUM_MBUFS * nb_ports + MBUF_CACHE_SIZE + RTE_MBUF_DEFAULT_BUF_SIZE);
+	hbm_alloc_len = (requested_len % PAGE_SIZE) + PAGE_SIZE;
+
+	/* construct iova_tables */
+
 
 	// ret = hbw_posix_memalign_psize(hb_virt_addr, 4096, requested_len, HBW_PAGESIZE_4KB);
 	ret = hbw_posix_memalign(&hb_virt_addr, 4096, 4096*10);
@@ -194,16 +201,10 @@ main(int argc, char *argv[])
 
 	}
 
-	/* Page-aligned above results in seg fault? */
-	// hb_virt_addr = hbw_malloc( requested_len);
-	// if (hb_virt_addr == NULL){
-	// 	rte_exit(EXIT_FAILURE, "Error with hbw_malloc allocation\n");
-	// }
-
 	ret = rte_malloc_heap_create("HBM-heap");
 	// rte_malloc_heap_memory_add();
 
-	ret = rte_malloc_heap_memory_add("HBM-heap", hb_virt_addr, requested_len, NULL, requested_len + 1, 4096); 
+	ret = rte_malloc_heap_memory_add("HBM-heap", hb_virt_addr, hbm_alloc_len , NULL, hbm_alloc_len/PAGE_SIZE, PAGE_SIZE); 
 	/*TODO: get hbw_malloc to return contiguous pages, so iova_addrs can be provided (NULL currently), && fix length fields */
 	if (ret == 0){
 		rte_exit(EXIT_FAILURE, "Could not add HBM to the heap\n");
