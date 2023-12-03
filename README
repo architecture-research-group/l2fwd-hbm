@@ -19,3 +19,24 @@ Report bugs and issues to the development mailing list: dev@dpdk.org
 /home/n869p538/mlnx_l2fwd_testing/dpdk/build
 (base) n869p538@emerald:build$ sudo ./examples/dpdk-hbm-fwd -l 1 -n 4
 ```
+```
+
+To run with PCM use : 
+sudo <pcm-memory-loc> 1 -nc -csv=pcm.csv -- ./build/examples/dpdk-l2fwd -l 0-3 -n 4 -- -q 1 -p 1 –P
+swap <pcm-memory-loc> with location of pcm-memory tool e.g /home/j152s822/Documents/pcm/build/bin/pcm-memory
+After that, to plot, run:
+python plot.py <memory_type> <socket_choice> <metric_choice>
+<memory_type> should be "h" for HBM or "m" for Mem
+<socket_choice> should be "0" (For socket 0 and HBM) or "1" (For socket 1) 
+<metric_choice> Should be "r" (Read bandwidth), "w" (Write Bandwidth), "t" (Total), or "rw"(Read and write on same graph).
+e.g 'python plot.py h 0 rw' for HBM Read and Write
+
+
+To restrict cache ways:
+```
+sudo pqos -e "llc:0=0x0001"
+sudo pqos -a "llc:0=0-10"
+
+#reset after testing
+sudo pqos -R
+```
