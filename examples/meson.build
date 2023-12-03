@@ -21,6 +21,7 @@ all_examples = [
         'flow_classify',
         'flow_filtering',
         'helloworld',
+        'hbm-fwd',
         'ip_fragmentation',
         'ip_pipeline',
         'ip_reassembly',
