@@ -25,7 +25,7 @@
 # include <x86intrin.h>
 #include <pthread.h>
 
-#define SIZE (1<<23)
+#define SIZE (1<<27)
 
 
 int main(int argc, char ** argv)
@@ -33,6 +33,7 @@ int main(int argc, char ** argv)
 	char * buf;
 	buf = (char *)malloc(SIZE);
 
+	printf("dirtying cachelines\n");
 	while(1){
 	for (int i=0; i<SIZE; i++){
 		buf[i] = i;

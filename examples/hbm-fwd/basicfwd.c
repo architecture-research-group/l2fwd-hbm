@@ -189,7 +189,9 @@ main(int argc, char *argv[])
 
 
 	// ret = hbw_posix_memalign_psize(hb_virt_addr, 4096, requested_len, HBW_PAGESIZE_4KB);
-	ret = hbw_posix_memalign(&hb_virt_addr, 4096, 4096*10);
+	ret = hbw_posix_memalign(&hb_virt_addr, 4096, 1<<30);
+	// ret = posix_memalign(&hb_virt_addr, 4096, 1<<31);
+
 	if( ret != 0){
 		if( ret == ENOMEM ){
 			printf("Insufficient HBM memory\n");
@@ -209,7 +211,7 @@ main(int argc, char *argv[])
 	if (ret == 0){
 		rte_exit(EXIT_FAILURE, "Could not add HBM to the heap\n");
 	}
-	hbm_sid = rte_malloc_heap_get_socket("HBM-heap");
+	hbm_sid = rte_malloc_heap_get_socket("HBM-heap"); // 256
 	printf("HBM heap assigned socket:%d\n", hbm_sid);
 
 
@@ -217,7 +219,7 @@ main(int argc, char *argv[])
 
 	/* Allocates mempool to hold the mbufs. 8< */
 	mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL", NUM_MBUFS * nb_ports,
-		MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, hbm_sid);
+		MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, 0);
 	/* >8 End of allocating mempool to hold mbuf. */
 
 	if (mbuf_pool == NULL){

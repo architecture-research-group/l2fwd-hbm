@@ -50,7 +50,7 @@ static int promiscuous_on;
 
 #define RTE_LOGTYPE_L2FWD RTE_LOGTYPE_USER1
 
-#define MAX_PKT_BURST 32
+#define MAX_PKT_BURST 2048
 #define BURST_TX_DRAIN_US 100 /* TX drain every ~100us */
 #define MEMPOOL_CACHE_SIZE 256
 
@@ -289,6 +289,10 @@ l2fwd_main_loop(void)
 			nb_rx = rte_eth_rx_burst(portid, 0,
 						 pkts_burst, MAX_PKT_BURST);
 
+			/* 
+				touch all packets in sequence
+				RX_Burst 
+			*/
 			if (unlikely(nb_rx == 0))
 				continue;
 
@@ -789,6 +793,11 @@ main(int argc, char **argv)
 	if (l2fwd_pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 	/* >8 End of create the mbuf pool. */
+
+
+	// Batch | 1- 10 | -> Buffers |B1-B10| populated w/ |RX1-RX10| -> B1-B10 dirty Cache_Cap=64*10
+	// Batch | 11 - 20 | -> Buffers |B1 - B10| written back to make space for |RX11-RX20|
+
 
 	/* Initialise each port */
 	RTE_ETH_FOREACH_DEV(portid) {

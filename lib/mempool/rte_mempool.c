@@ -891,8 +891,11 @@ rte_mempool_create_empty(const char *name, unsigned n, unsigned elt_size,
 	}
 
 	mz = rte_memzone_reserve(mz_name, mempool_size, socket_id, mz_flags);
-	if (mz == NULL)
+	if (mz == NULL){
+		printf("RTE_memzone_reserve failed: %s\n", mz_name);
 		goto exit_unlock;
+
+	}
 
 	/* init the mempool structure */
 	mp = mz->addr;

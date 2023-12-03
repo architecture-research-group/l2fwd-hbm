@@ -32,11 +32,18 @@ python plot.py <memory_type> <socket_choice> <metric_choice>
 e.g 'python plot.py h 0 rw' for HBM Read and Write
 
 
-To restrict cache ways:
+To restrict cache ways: (./pqos_1way.sh)
 ```
 sudo pqos -e "llc:0=0x0001"
 sudo pqos -a "llc:0=0-10"
 
 #reset after testing
 sudo pqos -R
+```
+
+To corun antagonist and l2fwd:
+```
+./pqos_1way.sh
+./antagonist/run.sh
+./start_l2fwd.sh
 ```
