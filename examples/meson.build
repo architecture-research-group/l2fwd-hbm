@@ -6,6 +6,8 @@ if get_option('default_library') == 'static'
     link_whole_libs = dpdk_static_libraries + dpdk_drivers
 endif
 
+memkind_dep = dependency('memkind', required: true)
+
 # list of all example apps. Keep 1-3 per line, in alphabetical order.
 all_examples = [
         'bbdev_app',
@@ -129,5 +131,7 @@ foreach example: examples
             link_whole: link_whole_libs,
             link_args: ldflags,
             c_args: cflags,
-            dependencies: dep_objs)
+            dependencies: dep_objs + [memkind_dep])
 endforeach
+
+

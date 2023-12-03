@@ -68,6 +68,9 @@ static struct rte_ether_addr l2fwd_ports_eth_addr[RTE_MAX_ETHPORTS];
 /* mask of enabled ports */
 static uint32_t l2fwd_enabled_port_mask = 0;
 
+/* alloc on hbm flag */
+static bool alloc_hbm = false;
+
 /* list of enabled ports */
 static uint32_t l2fwd_dst_ports[RTE_MAX_ETHPORTS];
 
@@ -101,6 +104,7 @@ static struct rte_eth_conf port_conf = {
 };
 
 struct rte_mempool * l2fwd_pktmbuf_pool = NULL;
+struct rte_mempool * hbm_pktmbuf_pool = NULL;
 
 /* Per-port statistics struct */
 struct l2fwd_port_statistics {
@@ -503,7 +507,10 @@ l2fwd_parse_args(int argc, char **argv)
 			}
 			timer_period = timer_secs;
 			break;
-
+		case 'H':
+			alloc_hbm = true;
+			printf("allocating on hbm\n");
+			break;
 		/* long options */
 		case CMD_LINE_OPT_PORTMAP_NUM:
 			ret = l2fwd_parse_port_pair_config(optarg);
@@ -774,6 +781,11 @@ main(int argc, char **argv)
 	l2fwd_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", nb_mbufs,
 		MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
 		rte_socket_id());
+	if (alloc_hbm){
+		hbm_pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", nb_mbufs,
+			MEMPOOL_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE,
+			rte_socket_id());
+	}
 	if (l2fwd_pktmbuf_pool == NULL)
 		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
 	/* >8 End of create the mbuf pool. */
@@ -831,10 +843,19 @@ main(int argc, char **argv)
 		rxq_conf = dev_info.default_rxconf;
 		rxq_conf.offloads = local_port_conf.rxmode.offloads;
 		/* RX queue setup. 8< */
-		ret = rte_eth_rx_queue_setup(portid, 0, nb_rxd,
+		if (! alloc_hbm){
+			ret = rte_eth_rx_queue_setup(portid, 0, nb_rxd,
 					     rte_eth_dev_socket_id(portid),
 					     &rxq_conf,
 					     l2fwd_pktmbuf_pool);
+		} else{
+			printf("Allocating rx queues on HBM\n");
+			ret = rte_eth_rx_queue_setup(portid, 0, nb_rxd,
+					     rte_eth_dev_socket_id(portid),
+					     &rxq_conf,
+					     hbm_pktmbuf_pool);
+		}
+		
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "rte_eth_rx_queue_setup:err=%d, port=%u\n",
 				  ret, portid);
