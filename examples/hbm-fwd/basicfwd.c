@@ -164,7 +164,7 @@ main(int argc, char *argv[])
 	void * hb_virt_addr;
 	uint16_t requested_len;
 
-	int s_id;
+	int hbm_sid;
 	/* Initializion the Environment Abstraction Layer (EAL). 8< */
 	int ret = rte_eal_init(argc, argv);
 	if (ret < 0)
@@ -179,46 +179,53 @@ main(int argc, char *argv[])
 	printf("number of ports:%d\n", nb_ports);
 
 	/* Allocate external HBM memory */
-	requested_len =  NUM_MBUFS * nb_ports + MBUF_CACHE_SIZE + RTE_MBUF_DEFAULT_BUF_SIZE;
+	requested_len =  (NUM_MBUFS * nb_ports + MBUF_CACHE_SIZE + RTE_MBUF_DEFAULT_BUF_SIZE) * 4096;
 
 	// ret = hbw_posix_memalign_psize(hb_virt_addr, 4096, requested_len, HBW_PAGESIZE_4KB);
-	// ret = hbw_posix_memalign(hb_virt_addr, 4096, requested_len);
-	// if( ret != 0){
-	// 	if( ret == ENOMEM ){
-	// 		printf("Insufficient HBM memory\n");
-	// 	}
-	// 	else if( ret == EINVAL){
-	// 		printf("Incorrect HBM allocation alignment\n");
-	// 	}
-	// }
+	ret = hbw_posix_memalign(&hb_virt_addr, 4096, 4096*10);
+	if( ret != 0){
+		if( ret == ENOMEM ){
+			printf("Insufficient HBM memory\n");
+		}
+		else if( ret == EINVAL){
+			printf("Incorrect HBM allocation alignment\n");
+		}
+		rte_exit(EXIT_FAILURE, "Could not allocate page-aligned HBM heap\n");
+
+	}
 
 	/* Page-aligned above results in seg fault? */
-	hb_virt_addr = hbw_malloc( requested_len);
-	if (hb_virt_addr == NULL){
-		rte_exit(EXIT_FAILURE, "Error with hbw_malloc allocation\n");
-	}
+	// hb_virt_addr = hbw_malloc( requested_len);
+	// if (hb_virt_addr == NULL){
+	// 	rte_exit(EXIT_FAILURE, "Error with hbw_malloc allocation\n");
+	// }
 
 	ret = rte_malloc_heap_create("HBM-heap");
 	// rte_malloc_heap_memory_add();
 
-	ret = rte_malloc_heap_memory_add("HBM-heap", hb_virt_addr, requested_len, NULL, requested_len/4096 + 1, 4096);
-	/*TODO: get hbw_malloc to return contiguous pages, so iova_addrs can be provided (NULL currently), */
+	ret = rte_malloc_heap_memory_add("HBM-heap", hb_virt_addr, requested_len, NULL, requested_len + 1, 4096); 
+	/*TODO: get hbw_malloc to return contiguous pages, so iova_addrs can be provided (NULL currently), && fix length fields */
 	if (ret == 0){
 		rte_exit(EXIT_FAILURE, "Could not add HBM to the heap\n");
 	}
-	s_id = rte_malloc_heap_get_socket("HBM-heap");
-	printf("HBM heap assigned socket:%d\n", s_id);
+	hbm_sid = rte_malloc_heap_get_socket("HBM-heap");
+	printf("HBM heap assigned socket:%d\n", hbm_sid);
 
 
 	/* Creates a new mempool in memory to hold the mbufs. */
 
 	/* Allocates mempool to hold the mbufs. 8< */
 	mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL", NUM_MBUFS * nb_ports,
-		MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
+		MBUF_CACHE_SIZE, 0, RTE_MBUF_DEFAULT_BUF_SIZE, hbm_sid);
 	/* >8 End of allocating mempool to hold mbuf. */
 
-	if (mbuf_pool == NULL)
-		rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
+	if (mbuf_pool == NULL){
+		if (rte_errno == ENOMEM ){
+			printf("no appropriate memory area found in which to create memzone\n");
+		}
+		rte_exit(EXIT_FAILURE, "Cannot create mbuf pool:%d\n", rte_errno);
+		
+	}
 
 	/* >8 End of initializing all ports. */
 
