@@ -44,6 +44,11 @@ sudo pqos -R
 To corun antagonist and l2fwd:
 ```
 ./pqos_1way.sh
-./antagonist/run.sh
+
+#shell 1
+cd antagonist
+./run.sh
+
+# shell 2
 ./start_l2fwd.sh
 ```
