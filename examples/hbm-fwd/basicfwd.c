@@ -10,6 +10,8 @@
 #include <rte_cycles.h>
 #include <rte_lcore.h>
 #include <rte_mbuf.h>
+
+#include <rte_eal.h>
 #include <hbwmalloc.h>
 
 #define RX_RING_SIZE 1024
@@ -160,8 +162,9 @@ main(int argc, char *argv[])
 	uint16_t portid;
 
 	void * hb_virt_addr;
-	uint16_t requested_len = NUM_MBUFS * nb_ports + MBUF_CACHE_SIZE + RTE_MBUF_DEFAULT_BUF_SIZE;
+	uint16_t requested_len;
 
+	int s_id;
 	/* Initializion the Environment Abstraction Layer (EAL). 8< */
 	int ret = rte_eal_init(argc, argv);
 	if (ret < 0)
@@ -176,8 +179,36 @@ main(int argc, char *argv[])
 	printf("number of ports:%d\n", nb_ports);
 
 	/* Allocate external HBM memory */
-	hb_virt_addr = hbw_malloc(requested_len);
-	/* */
+	requested_len =  NUM_MBUFS * nb_ports + MBUF_CACHE_SIZE + RTE_MBUF_DEFAULT_BUF_SIZE;
+
+	// ret = hbw_posix_memalign_psize(hb_virt_addr, 4096, requested_len, HBW_PAGESIZE_4KB);
+	// ret = hbw_posix_memalign(hb_virt_addr, 4096, requested_len);
+	// if( ret != 0){
+	// 	if( ret == ENOMEM ){
+	// 		printf("Insufficient HBM memory\n");
+	// 	}
+	// 	else if( ret == EINVAL){
+	// 		printf("Incorrect HBM allocation alignment\n");
+	// 	}
+	// }
+
+	/* Page-aligned above results in seg fault? */
+	hb_virt_addr = hbw_malloc( requested_len);
+	if (hb_virt_addr == NULL){
+		rte_exit(EXIT_FAILURE, "Error with hbw_malloc allocation\n");
+	}
+
+	ret = rte_malloc_heap_create("HBM-heap");
+	// rte_malloc_heap_memory_add();
+
+	ret = rte_malloc_heap_memory_add("HBM-heap", hb_virt_addr, requested_len, NULL, requested_len/4096 + 1, 4096);
+	/*TODO: get hbw_malloc to return contiguous pages, so iova_addrs can be provided (NULL currently), */
+	if (ret == 0){
+		rte_exit(EXIT_FAILURE, "Could not add HBM to the heap\n");
+	}
+	s_id = rte_malloc_heap_get_socket("HBM-heap");
+	printf("HBM heap assigned socket:%d\n", s_id);
+
 
 	/* Creates a new mempool in memory to hold the mbufs. */
 
