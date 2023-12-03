@@ -14,4 +14,8 @@ Report bugs and issues to the development mailing list: dev@dpdk.org
 (base) n869p538@emerald:examples$ pwd
 /home/n869p538/mlnx_l2fwd_testing/dpdk/build/examples
 (base) n869p538@emerald:examples$ sudo ./dpdk-l2fwd -l 0-3 -n 4 -- -q 1 -p 1 –P
+
+(base) n869p538@emerald:build$ pwd
+/home/n869p538/mlnx_l2fwd_testing/dpdk/build
+(base) n869p538@emerald:build$ sudo ./examples/dpdk-hbm-fwd -l 1 -n 4
 ```
