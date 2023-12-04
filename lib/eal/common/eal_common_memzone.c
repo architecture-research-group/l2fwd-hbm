@@ -160,13 +160,10 @@ memzone_reserve_aligned_thread_unsafe(const char *name, size_t len,
 		if (len == 0)
 			requested_len = bound;
 		/* allocate memory on heap */
-		printf("heap alloc len:%ld contig:%d\n", requested_len, contig);
-
 		mz_addr = malloc_heap_alloc(NULL, requested_len, socket_id,
 				flags, align, bound, contig);
 	}
 	if (mz_addr == NULL) {
-		printf("malloc heap in memzone_reserve_aligned_thread_unsafe failed socket_id:%d\n", socket_id);
 		rte_errno = ENOMEM;
 		return NULL;
 	}
