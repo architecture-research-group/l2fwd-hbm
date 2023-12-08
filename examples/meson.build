@@ -28,6 +28,7 @@ all_examples = [
         'ipsec-secgw',
         'ipv4_multicast',
         'l2fwd',
+        'l2fwd-incr-membw',
         'l2fwd-cat',
         'l2fwd-crypto',
         'l2fwd-event',
